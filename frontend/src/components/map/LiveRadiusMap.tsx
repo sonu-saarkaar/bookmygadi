@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { authStore } from "@/services/backendApi";
+import { resolveApiBaseUrl } from "@/services/network";
 import { Crosshair } from "lucide-react";
 
 interface RadarDriver {
@@ -41,6 +42,7 @@ const userLocationIcon = L.divIcon({
 const RADIUS_METERS = 10000;
 
 export const LiveRadiusMap: React.FC = () => {
+  const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
@@ -69,7 +71,7 @@ export const LiveRadiusMap: React.FC = () => {
   const fetchNearbyDrivers = async (lat: number, lng: number) => {
     try {
       const token = authStore.getToken();
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"}/api/v1/radar/nearby?lat=${lat}&lng=${lng}&radius_km=10`, {
+      const res = await fetch(`${apiBaseUrl}/api/v1/radar/nearby?lat=${lat}&lng=${lng}&radius_km=10`, {
         headers: {
           Authorization: `Bearer ${token || ""}`
         }

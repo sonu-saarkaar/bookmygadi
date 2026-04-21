@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { adminV2Api } from "@/admin_v2/services/adminApi";
 import { Button, Card, Chip } from "@/admin_v2/components/ui";
 import { useAdminV2Store } from "@/admin_v2/store/useAdminStore";
+import { resolveApiBaseUrl } from "@/services/network";
 
 const COLUMNS = [
   { id: "NEW REQUEST", label: "New Request" },
@@ -13,6 +14,7 @@ const COLUMNS = [
 ];
 
 export const CRMBoard = () => {
+  const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
   const { pushToast } = useAdminV2Store();
   const [drivers, setDrivers] = useState<any[]>([]);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -97,8 +99,8 @@ export const CRMBoard = () => {
           <p className="text-sm text-slate-500">Operations pipeline for driver onboarding</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/crm/export-csv?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export CSV</Button>
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/crm/export-excel?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export Excel</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/crm/export-csv?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export CSV</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/crm/export-excel?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export Excel</Button>
           <Button onClick={loadCRM}>Refresh Board</Button>
         </div>
       </div>

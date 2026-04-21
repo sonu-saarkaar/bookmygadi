@@ -3,6 +3,7 @@ import { adminV2Api } from "@/admin_v2/services/adminApi";
 import { Button, Card, Chip, Modal } from "@/admin_v2/components/ui";
 import { useAdminV2Store } from "@/admin_v2/store/useAdminStore";
 import * as Lucide from "lucide-react";
+import { resolveApiBaseUrl } from "@/services/network";
 
 const COLUMNS = [
   { id: "NEW", label: "New Requests", tone: "info" },
@@ -13,6 +14,7 @@ const COLUMNS = [
 ];
 
 export const RiderManagementBoard = () => {
+  const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
   const { pushToast } = useAdminV2Store();
   const [drivers, setDrivers] = useState<any[]>([]);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -147,8 +149,8 @@ export const RiderManagementBoard = () => {
               className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm w-64 outline-none focus:border-emerald-500"
             />
           </div>
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/crm/export-csv?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export CSV</Button>
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/crm/export-excel?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export Excel</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/crm/export-csv?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export CSV</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/crm/export-excel?token=${localStorage.getItem("bmg_admin_v2_token")}`, '_blank')}>Export Excel</Button>
           <Button onClick={loadCRM}>Refresh</Button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { resolveApiBaseUrl, toWebSocketUrl } from "./network";
 
-const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
 const API_PREFIX = "/api/v1";
 const TOKEN_KEY = "bmg_access_token";
 

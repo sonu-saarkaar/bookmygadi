@@ -1,7 +1,7 @@
 import { resolveApiBaseUrl } from "@/services/network";
 
-export const ADMIN_V2_API_BASE = import.meta.env.VITE_ADMIN_V2_API_BASE || "http://127.0.0.1:8000/api/v2";
-const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
+export const ADMIN_V2_API_BASE = import.meta.env.VITE_ADMIN_V2_API_BASE || `${API_BASE_URL}/api/v2`;
 const ADMIN_V1_API_BASE = `${API_BASE_URL}/api/v1`;
 const TOKEN_KEY = "bmg_admin_v2_token";
 

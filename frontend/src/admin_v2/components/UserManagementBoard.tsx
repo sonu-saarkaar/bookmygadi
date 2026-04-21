@@ -3,8 +3,10 @@ import { adminV2Api } from "@/admin_v2/services/adminApi";
 import { Button, Card, Chip, Modal } from "@/admin_v2/components/ui";
 import { useAdminV2Store } from "@/admin_v2/store/useAdminStore";
 import * as Lucide from "lucide-react";
+import { resolveApiBaseUrl } from "@/services/network";
 
 export const UserManagementBoard = () => {
+  const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
   const { pushToast } = useAdminV2Store();
   const [users, setUsers] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>({});
@@ -115,8 +117,8 @@ export const UserManagementBoard = () => {
           <p className="text-sm text-slate-500">Lifecycle, Offers, and Behavioral Tracking</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/users-mgmt/export/csv?token=${localStorage.getItem("bmg_admin_v2_token") || localStorage.getItem("bmg_token")}`, '_blank')}>Export CSV</Button>
-          <Button variant="outline" onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}/api/v1/users-mgmt/export/excel?token=${localStorage.getItem("bmg_admin_v2_token") || localStorage.getItem("bmg_token")}`, '_blank')}>Export Excel</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/users-mgmt/export/csv?token=${localStorage.getItem("bmg_admin_v2_token") || localStorage.getItem("bmg_token")}`, '_blank')}>Export CSV</Button>
+          <Button variant="outline" onClick={() => window.open(`${apiBaseUrl}/api/v1/users-mgmt/export/excel?token=${localStorage.getItem("bmg_admin_v2_token") || localStorage.getItem("bmg_token")}`, '_blank')}>Export Excel</Button>
           <Button onClick={loadData}>Refresh</Button>
         </div>
       </div>

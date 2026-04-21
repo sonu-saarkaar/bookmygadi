@@ -1,7 +1,7 @@
 import { authStore } from "./backendApi";
 import { resolveApiBaseUrl } from "./network";
 
-const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL);
 const API_PREFIX = "/api/v1/rider";
 const EMBEDDED_RIDER_API_KEY = import.meta.env.VITE_RIDER_APP_API_KEY || "rider_app_linked_key_change_in_production";
 
