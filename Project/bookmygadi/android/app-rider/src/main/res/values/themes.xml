@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Use AppCompat theme since we removed Material3/Compose dependencies.
+         The real UI is rendered in WebView so the native theme only affects
+         the status bar / loading flash color. -->
+    <style name="Theme.BookMyGadi" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <!-- Matching Website Theme: Primary Black, Accent Emerald -->
+        <item name="colorPrimary">#000000</item>
+        <item name="colorPrimaryDark">#000000</item>
+        <item name="colorAccent">#10B981</item>
+    </style>
+
+    <style name="Theme.BookMyGadi.Splash" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+</resources>

@@ -1,0 +1,123 @@
+{bookingState === "pricing" && (
+           <div className="relative group/modal">
+             <motion.div 
+               key="pricing" 
+               initial={{ opacity: 0, y: 30 }} 
+               animate={{ opacity: 1, y: 0 }} 
+               className="bg-white rounded-[32px] p-5 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-gray-100 overflow-hidden relative"
+             >
+               {/* REAL LIVE MAP */}
+               <LiveMap 
+                 pickup={pickupCoords} 
+                 drop={destinationCoords}
+                 distance={`${quoteDistance || selectedDistance?.toFixed(1) || "1.0"} KM`}
+                 duration={`~${(Number(quoteDistance || selectedDistance || "1.0") * 2.5).toFixed(0)} MINS`}
+               />
+
+               {/* COMPACT PRIORITY MODES */}
+               <div className="flex gap-2 mb-6">
+                  {[
+                    { id: 'quick', label: 'Quick', icon: Zap, activeClass: 'bg-amber-50 text-amber-600 border border-amber-200', iconClass: 'text-amber-500 fill-amber-500' },
+                    { id: 'normal', label: 'Normal', icon: Navigation, activeClass: 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20', iconClass: 'text-[#10b981] fill-[#10b981]' },
+                    { id: 'emergency', label: 'Emergency', icon: Shield, activeClass: 'bg-rose-50 text-rose-600 border border-rose-200', iconClass: 'text-rose-500 fill-rose-500' }
+                  ].map((mode) => {
+                    const isActive = bookingPriority === mode.id;
+                    const Icon = mode.icon;
+                    return (
+                      <button 
+                        key={mode.id}
+                        onClick={() => setBookingPriority(mode.id as any)}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl transition-all duration-200 ${
+                          isActive ? mode.activeClass : 'bg-gray-50 text-gray-400 hover:bg-gray-100 border border-transparent'
+                        }`}
+                      >
+                        <Icon size={14} className={isActive ? mode.iconClass : 'text-gray-400'} strokeWidth={isActive ? 2.5 : 2} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">{mode.label}</span>
+                      </button>
+                    )
+                  })}
+               </div>
+
+               {/* FARE SECTION */}
+               <div className="text-center mb-2">
+                  <motion.div 
+                    key={offerPrice}
+                    initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                    className="flex justify-center items-start"
+                  >
+                    <span className="text-4xl font-black text-slate-800 mt-2 mr-1 tracking-tighter">₹</span>
+                    <span className="text-[64px] font-black tracking-tighter text-[#0f172a] leading-none">
+                      {offerPrice}
+                    </span>
+                  </motion.div>
+                  
+                  <div className="mt-8 px-2 relative">
+                    <div className="flex justify-between items-end mb-4">
+                       <div className="flex flex-col items-start">
+                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-1">Minimum</span>
+                         <span className="text-[#0f172a] text-sm font-black tracking-tight">{formatMoney(minFare)}</span>
+                       </div>
+                       <div className="flex flex-col items-end">
+                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-1">Maximum</span>
+                         <span className="text-[#0f172a] text-sm font-black tracking-tight">{formatMoney(maxFare)}</span>
+                       </div>
+                    </div>
+                    
+                    <div className="relative h-2.5 bg-gray-100 rounded-full group cursor-pointer flex items-center">
+                      <motion.div 
+                        initial={false}
+                        animate={{ width: `${sliderFillPercent}%` }}
+                        className="absolute left-0 top-0 bottom-0 bg-[#0f172a] rounded-full transition-all duration-150"
+                      />
+                      <input
+                        type="range" min={minFare} max={maxFare} step={10} value={offerPrice}
+                        onChange={(e) => setOfferPrice(Number(e.target.value))}
+                        className="absolute inset-[-10px] w-[calc(100%+20px)] bg-transparent appearance-none cursor-pointer z-10 opacity-0"
+                      />
+                      {/* Custom Dragger visual */}
+                      <motion.div
+                        animate={{ left: `calc(${sliderFillPercent}% - 12px)` }}
+                        className="absolute w-6 h-6 bg-white border-[6px] border-[#0f172a] rounded-full shadow-md z-0 pointer-events-none transition-all duration-150"
+                      />
+                    </div>
+                  </div>
+               </div>
+             </motion.div>
+
+             {/* SWIPE TO BOOK BUTTON */}
+             <motion.div 
+               initial={{ opacity: 0, y: 20 }}
+               animate={{ opacity: 1, y: 0 }}
+               transition={{ delay: 0.1 }}
+               className="mt-6"
+             >
+                <div className="relative h-[72px] bg-[#0f172a] rounded-full p-2 flex items-center shadow-[0_12px_24px_rgba(15,23,42,0.25)] group overflow-hidden">
+                   <motion.div 
+                     drag="x"
+                     dragConstraints={{ left: 0, right: 240 }}
+                     dragElastic={0.02}
+                     onDragEnd={(_, info) => {
+                        if (info.offset.x > 200) {
+                           onBookRide();
+                        }
+                     }}
+                     className="w-[56px] h-[56px] bg-white rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing z-20 relative shadow-sm hover:scale-105 transition-transform duration-200"
+                   >
+                      <ChevronRight size={28} className="text-[#0f172a]" strokeWidth={4} />
+                   </motion.div>
+                   
+                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none pr-8">
+                      <p className="text-gray-400 text-sm font-black uppercase tracking-[0.2em] transition-colors group-hover:text-white">
+                        {loading ? 'Processing...' : 'Swipe to Book'}
+                      </p>
+                   </div>
+                   
+                   <div className="ml-auto pr-6 text-gray-500">
+                      <Shield size={22} strokeWidth={2.5} />
+                   </div>
+                </div>
+             </motion.div>
+           </div>
+        )}
+
+        

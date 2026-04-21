@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Google Maps API key.
+    This value is read by:
+      - AndroidManifest  → com.google.android.geo.API_KEY meta-data
+      - DriverTrackingScreen → context.getString(R.string.google_maps_key)
+    KEEP THIS FILE OUT OF VERSION CONTROL if the key is production-sensitive.
+-->
+<resources>
+    <string name="google_maps_key" templateMergeStrategy="preserve" translatable="false">AIzaSyDAfy7Rud99gcPIUWLnRZ-Prc4oooGbQu8</string>
+</resources>

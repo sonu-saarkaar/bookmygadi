@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_container"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <!-- The 4-piece wedge wheel -->
+    <com.bookmygadi.rider.PieMenuView
+        android:id="@+id/pie_menu"
+        android:layout_width="290dp"
+        android:layout_height="290dp"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+    <!-- Center Button -->
+    <FrameLayout android:id="@+id/main_head"
+        android:layout_width="84dp"
+        android:layout_height="84dp"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_float_circle_new"
+        android:elevation="14dp">
+
+        <TextView android:id="@+id/tv_timer"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="00:00" android:textColor="#4ADE80" android:textStyle="bold" 
+            android:textSize="18sp" android:layout_gravity="center"
+            android:shadowColor="#44000000" android:shadowDx="1" android:shadowDy="1" android:shadowRadius="2"/>
+
+        <!-- The Red X -->
+        <TextView android:id="@+id/img_close"
+             android:layout_width="wrap_content" android:layout_height="wrap_content"
+             android:text="x" android:textColor="#EF4444" android:textSize="40sp" android:textStyle="bold"
+             android:layout_gravity="center" android:translationY="-3dp"
+             android:visibility="gone" />
+    </FrameLayout>
+</FrameLayout>
