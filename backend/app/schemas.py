@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class HealthResponse(BaseModel):
     status: str
     message: str
+    database_path: str | None = None
+    database_exists: bool | None = None
+    users_count: int | None = None
+    rides_count: int | None = None
 
 
 class Token(BaseModel):

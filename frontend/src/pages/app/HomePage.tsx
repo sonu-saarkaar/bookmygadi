@@ -404,7 +404,7 @@ const HomePage = () => {
       return;
     }
 
-    if (location.pathname === "/app/home" && (bookingState === "pricing" || bookingState === "searching" || bookingState === "reserve_summary")) {
+    if (location.pathname === "/app/home" && (bookingState === "pricing" || bookingState === "searching")) {
       setBookingState("form");
     }
   }, [location.pathname, bookingState]);
@@ -1217,8 +1217,9 @@ const handleDestinationSearch = async (query: string) => {
       navigate("/app/searching", { state: ridePayload, replace: true });
     } catch {
       setMessage("Booking failed.");
-      setBookingState("pricing");
-      // navigate(serviceMode === "reserved" ? RESERVATION_PRICE_NEGOTION_PATH : "/app/price_negotiation", { replace: true });
+      const isReserve = serviceMode === "reserved" || urgencyType === 'reserve';
+      setBookingState(isReserve ? "reserve_summary" : "pricing");
+      if (!isReserve) navigate("/app/price_negotiation", { replace: true });
       setTimeout(() => setMessage(''), 3000);
     } finally {
       setLoading(false);
@@ -2074,7 +2075,7 @@ const handleDestinationSearch = async (query: string) => {
               <button
                 onClick={() => {
                   setBookingState("form");
-                  // navigate("/app/home", { replace: true });
+                  navigate("/app/home", { replace: true });
                 }}
                 className="w-[60px] h-[64px] rounded-[24px] bg-red-50 border border-red-100 flex items-center justify-center text-red-500 shrink-0 shadow-sm"
               >

@@ -16,6 +16,7 @@ from app.api.crm import router as crm_router
 from app.api.users_mgmt import router as users_mgmt_router
 from app.admin_panel import admin_app_router
 from app.core.config import settings
+from app.core.db_backup import create_sqlite_backup
 from app.core.security import get_password_hash
 from app.db import Base, engine
 from app.models import User, VehicleInventory
@@ -23,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
+# Keep a point-in-time copy before runtime migrations or seeding touches the DB.
+create_sqlite_backup(settings.database_url)
 Base.metadata.create_all(bind=engine)
 
 
