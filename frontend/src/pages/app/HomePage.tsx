@@ -1530,14 +1530,7 @@ const handleDestinationSearch = async (query: string) => {
 
   return (
     <div className="relative isolate w-full min-h-screen overflow-x-hidden bg-[#fdfefe] transition-colors duration-700">
-      {isInstantHomeLayout && (
-        <>
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-[170px] bg-[linear-gradient(180deg,rgba(22,163,74,0.07),rgba(255,255,255,0))]" />
-          <div className="pointer-events-none absolute left-[-56px] top-[-42px] h-[180px] w-[180px] rounded-full bg-emerald-100/35 blur-3xl" />
-          <div className="pointer-events-none absolute right-[-48px] top-[-36px] h-[160px] w-[160px] rounded-full bg-emerald-50/75 blur-3xl" />
-        </>
-      )}
-      <div className={`relative z-10 w-full ${isInstantHomeLayout ? "px-2 pt-3" : "px-3 pt-3"}`}>
+      <div className={`relative z-10 w-full ${isInstantHomeLayout ? "px-0 pt-0" : "px-3 pt-3"}`}>
       <AnimatePresence mode="wait">
         {message && (
           <motion.div 
@@ -1615,7 +1608,7 @@ const handleDestinationSearch = async (query: string) => {
 
       {/* TOP BAR: Profile (Left) - Location (Center) - Vehicle (Right) */}
       {bookingState !== "pricing" && bookingState !== "searching" && (
-        <div className={`mb-5 flex items-center justify-between ${isInstantHomeLayout ? "gap-3.5 px-0.5 py-2" : "py-1"}`}>
+        <div className={`mb-3 flex items-center justify-between ${isInstantHomeLayout ? "gap-3 py-0.5 px-0" : "py-1"}`}>
           <motion.div 
             whileTap={{ scale: 0.9 }}
             onClick={() => navigate("/app/profile")} 
@@ -1664,7 +1657,7 @@ const handleDestinationSearch = async (query: string) => {
 
       <AnimatePresence mode="wait">
         {bookingState === "form" && (
-          <motion.div key="form" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="space-y-3 pb-24">
+          <motion.div key="form" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className={`${isInstantHomeLayout ? "space-y-3 pb-24 px-0" : "space-y-3 pb-24"}`}>
             
             {/* RIDE TYPE OR PICKUP TYPE BUTTONS */}
             {vehicleType === "BOLERO" && serviceMode === "Instant Ride" ? (

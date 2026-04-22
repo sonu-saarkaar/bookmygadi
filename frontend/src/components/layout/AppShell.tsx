@@ -37,6 +37,7 @@ const NO_OVERFLOW_PATHS = [
 const AppShell = () => {
   const location = useLocation();
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const isHomeRoute = location.pathname.startsWith("/app/home");
   const hideBottomNav =
     location.pathname.startsWith("/app/price_negotiation") ||
     location.pathname.startsWith("/app/reservation/price_negotion") ||
@@ -63,8 +64,10 @@ const AppShell = () => {
   }, []);
 
   return (
-    <div className="min-h-[100vh] bg-[#FAFAFA] font-sans selection:bg-primary-accent/20">
-      <main className={`mx-auto w-full max-w-md bg-white min-h-[100vh] shadow-xl relative ${noOverflow ? "" : "overflow-hidden"}`}>
+    <div className={`min-h-[100vh] font-sans selection:bg-primary-accent/20 ${isHomeRoute ? "bg-white" : "bg-[#FAFAFA]"}`}>
+      <main
+        className={`w-full min-h-[100vh] relative ${isHomeRoute ? "bg-white" : "mx-auto max-w-md bg-white shadow-xl"} ${noOverflow ? "" : "overflow-hidden"}`}
+      >
         {!isFullscreen && (
           <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-primary-accent/5 to-transparent pointer-events-none" />
         )}
@@ -76,12 +79,12 @@ const AppShell = () => {
           </div>
         ) : isAndroidWebView ? (
           /* Android WebView — skip framer-motion opacity transition to prevent white screen */
-          <div className="relative z-10 px-4 pt-8 pb-[120px]">
+          <div className={`relative z-10 pb-[120px] ${isHomeRoute ? "px-0 pt-0" : "px-4 pt-8"}`}>
             <Outlet />
           </div>
         ) : (
           /* Desktop / iOS — smooth page transitions */
-          <div className="relative z-10 px-4 pt-8 pb-[120px]">
+          <div className={`relative z-10 pb-[120px] ${isHomeRoute ? "px-0 pt-0" : "px-4 pt-8"}`}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}
@@ -103,7 +106,7 @@ const AppShell = () => {
         className="fixed bottom-0 left-0 right-0 z-[9999]"
         style={{ position: "fixed", bottom: 0 }}
       >
-         <div className="mx-auto w-full max-w-md relative flex flex-col justify-end">
+         <div className={`w-full relative flex flex-col justify-end ${isHomeRoute ? "" : "mx-auto max-w-md"}`}>
             <div className="relative w-full h-[70px] drop-shadow-[0_-2px_6px_rgba(0,0,0,0.06)] flex pointer-events-none">
                 
                 {/* Left flat bar */}
