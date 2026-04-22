@@ -64,11 +64,15 @@ const AppShell = () => {
   }, []);
 
   return (
-    <div className={`min-h-[100vh] font-sans selection:bg-primary-accent/20 ${isHomeRoute ? "bg-white" : "bg-[#FAFAFA]"}`}>
+    <div className={`min-h-[100vh] font-sans selection:bg-primary-accent/20 ${isHomeRoute ? "bg-[#f2f5f7]" : "bg-[#FAFAFA]"}`}>
       <main
-        className={`w-full min-h-[100vh] relative ${isHomeRoute ? "bg-white" : "mx-auto max-w-md bg-white shadow-xl"} ${noOverflow ? "" : "overflow-hidden"}`}
+        className={`w-full min-h-[100vh] relative ${
+          isHomeRoute
+            ? "mx-auto max-w-[430px] bg-white md:shadow-xl"
+            : "mx-auto max-w-md bg-white shadow-xl"
+        } ${noOverflow ? "" : "overflow-hidden"}`}
       >
-        {!isFullscreen && (
+        {!isFullscreen && !isHomeRoute && (
           <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-primary-accent/5 to-transparent pointer-events-none" />
         )}
 
@@ -106,7 +110,7 @@ const AppShell = () => {
         className="fixed bottom-0 left-0 right-0 z-[9999]"
         style={{ position: "fixed", bottom: 0 }}
       >
-         <div className={`w-full relative flex flex-col justify-end ${isHomeRoute ? "" : "mx-auto max-w-md"}`}>
+         <div className={`w-full relative flex flex-col justify-end ${isHomeRoute ? "mx-auto max-w-[430px]" : "mx-auto max-w-md"}`}>
             <div className="relative w-full h-[70px] drop-shadow-[0_-2px_6px_rgba(0,0,0,0.06)] flex pointer-events-none">
                 
                 {/* Left flat bar */}
