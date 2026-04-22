@@ -5,7 +5,7 @@ import { Button, Card } from "@/admin_v2/components/ui";
 
 const AdminV2LoginPage = () => {
   const { setIdentity } = useAdminV2Store();
-  const [email, setEmail] = useState("admin@bookmygadi.app");
+  const [email, setEmail] = useState("admin@bookmygadi.com");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,6 +23,7 @@ const AdminV2LoginPage = () => {
       const auth = await adminV2Api.login(email, password);
       adminTokenStore.set(auth.access_token);
       setIdentity(auth.name, "admin");
+      if ((auth as any).email) setEmail((auth as any).email);
       window.location.href = "/admin-v2";
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");

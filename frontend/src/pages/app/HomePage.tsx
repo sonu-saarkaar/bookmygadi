@@ -4,7 +4,7 @@ import { authStore, backendApi, type NearbyRider, type VehicleInventory } from "
 import { playSound } from "@/services/notificationCenter";
 import { formatPreciseReverseAddress, geocodeAddressWithGoogle, hasGoogleMapsApiKey, reverseGeocodeWithGoogle } from "@/services/googleMaps";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Navigation, Map, ShieldCheck, CreditCard, ChevronRight, User, Search, Clock, Zap, CalendarDays, X, Check, Plus, Trash2, Car, Tag, ChevronDown, ChevronUp, Wallet, Shield, Crosshair } from "lucide-react";
+import { MapPin, Navigation, Map, ShieldCheck, CreditCard, ChevronRight, User, Search, Clock, Zap, CalendarDays, X, Check, Plus, Minus, Trash2, Car, Tag, ChevronDown, ChevronUp, Wallet, Shield, Crosshair, ArrowUpDown } from "lucide-react";
 import { MapLocationPickerModal } from "../../components/map/MapLocationPickerModal";
 
 interface VehicleEntry {
@@ -182,6 +182,10 @@ const HomePage = () => {
   });
 
   const addSixHoursToReturnTime = () => {
+    shiftReturnTimeByHours(6);
+  };
+
+  const shiftReturnTimeByHours = (deltaHours: number) => {
     try {
       const parts = returnTime.split('::');
       if (parts.length !== 2) throw new Error();
@@ -193,7 +197,7 @@ const HomePage = () => {
       if (ampm.toUpperCase() === 'AM' && hours === 12) hours = 0;
       const fullYear = parseInt("20" + yy, 10);
       const d = new Date(fullYear, parseInt(mm, 10) - 1, parseInt(dd, 10), hours, parseInt(min, 10));
-      d.setHours(d.getHours() + 6);
+      d.setHours(d.getHours() + deltaHours);
       const outDd = String(d.getDate()).padStart(2, "0");
       const outMm = String(d.getMonth() + 1).padStart(2, "0");
       const outYy = String(d.getFullYear()).slice(-2);
@@ -203,7 +207,7 @@ const HomePage = () => {
       const outMin = String(d.getMinutes()).padStart(2, "0");
       setReturnTime(`${outDd}:${outMm}:${outYy}::${outHh}:${outMin} ${outAmpm}`);
     } catch {
-      const d = new Date(); d.setHours(d.getHours() + 6);
+      const d = new Date(); d.setHours(d.getHours() + deltaHours);
       const outDd = String(d.getDate()).padStart(2, "0");
       const outMm = String(d.getMonth() + 1).padStart(2, "0");
       const outYy = String(d.getFullYear()).slice(-2);
@@ -380,6 +384,10 @@ const HomePage = () => {
       return;
     }
     setPickupOffset(nextOffset);
+  };
+
+  const handlePickupOffsetDecrease = () => {
+    setPickupOffset((prev) => Math.max(0, prev - 1));
   };
 
   useEffect(() => {
@@ -1439,6 +1447,31 @@ const handleDestinationSearch = async (query: string) => {
     btnActiveText: 'text-indigo-600',
   };
 
+  const isInstantHomeLayout = serviceMode === 'Instant Ride' && vehicleType !== "BOLERO";
+  const rectangularCardClass = "rounded-[24px] border border-slate-100 bg-white px-[16px] py-[16px] shadow-[0_10px_24px_rgba(15,23,42,0.045)]";
+  const rectangularActionButtonClass = "flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_3px_10px_rgba(15,23,42,0.065)] transition-transform active:scale-95";
+  const pickupAccuracyLabel = isRefreshingPickupLocation || pickup === "Fetching Live Location..."
+    ? "Refreshing your live location"
+    : "Tap to refresh accurate live location";
+  const getReturnHoursLabel = () => {
+    try {
+      const parts = returnTime.split("::");
+      if (parts.length !== 2) throw new Error();
+      const [dd, mm, yy] = parts[0].split(":");
+      const [time, ampm] = parts[1].split(" ");
+      let [h, min] = time.split(":");
+      let hours = parseInt(h, 10);
+      if (ampm.toUpperCase() === "PM" && hours < 12) hours += 12;
+      if (ampm.toUpperCase() === "AM" && hours === 12) hours = 0;
+      const target = new Date(parseInt(`20${yy}`, 10), parseInt(mm, 10) - 1, parseInt(dd, 10), hours, parseInt(min, 10));
+      const diffMs = target.getTime() - Date.now();
+      const diffHours = Math.max(1, Math.round(diffMs / (1000 * 60 * 60)));
+      return `${diffHours} Hours`;
+    } catch {
+      return "6 Hours";
+    }
+  };
+
   useEffect(() => {
     const token = authStore.getToken();
     if (!token || !pickupCoords || bookingState !== "pricing") {
@@ -1496,7 +1529,15 @@ const handleDestinationSearch = async (query: string) => {
 
 
   return (
-    <div className={`relative isolate w-full px-4 pt-2 min-h-screen transition-colors duration-700 ${serviceMode === 'Instant Ride' ? 'bg-emerald-50/30' : 'bg-indigo-50/30'}`}>
+    <div className="relative isolate w-full min-h-screen overflow-x-hidden bg-[#fdfefe] transition-colors duration-700">
+      {isInstantHomeLayout && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-[170px] bg-[linear-gradient(180deg,rgba(22,163,74,0.07),rgba(255,255,255,0))]" />
+          <div className="pointer-events-none absolute left-[-56px] top-[-42px] h-[180px] w-[180px] rounded-full bg-emerald-100/35 blur-3xl" />
+          <div className="pointer-events-none absolute right-[-48px] top-[-36px] h-[160px] w-[160px] rounded-full bg-emerald-50/75 blur-3xl" />
+        </>
+      )}
+      <div className={`relative z-10 w-full ${isInstantHomeLayout ? "px-2 pt-3" : "px-3 pt-3"}`}>
       <AnimatePresence mode="wait">
         {message && (
           <motion.div 
@@ -1574,11 +1615,11 @@ const handleDestinationSearch = async (query: string) => {
 
       {/* TOP BAR: Profile (Left) - Location (Center) - Vehicle (Right) */}
       {bookingState !== "pricing" && bookingState !== "searching" && (
-        <div className="flex items-center justify-between py-1 mb-5">
+        <div className={`mb-5 flex items-center justify-between ${isInstantHomeLayout ? "gap-3.5 px-0.5 py-2" : "py-1"}`}>
           <motion.div 
             whileTap={{ scale: 0.9 }}
             onClick={() => navigate("/app/profile")} 
-            className="w-12 h-12 rounded-full shadow-soft flex items-center justify-center border border-gray-100 cursor-pointer transition-transform shrink-0 relative overflow-hidden bg-gradient-to-br from-emerald-400 to-primary-accent"
+            className={`${isInstantHomeLayout ? "h-[58px] w-[58px] ring-[3px] ring-emerald-50" : "w-12 h-12"} rounded-full shadow-soft flex items-center justify-center border border-gray-100 cursor-pointer transition-transform shrink-0 relative overflow-hidden bg-gradient-to-br from-emerald-400 to-primary-accent`}
           >
              {userProfileData.avatar ? (
                 <img 
@@ -1588,7 +1629,7 @@ const handleDestinationSearch = async (query: string) => {
                   style={{ transform: `translate(calc(-50% + ${userProfileData.x}px), calc(-50% + ${userProfileData.y}px)) scale(${userProfileData.scale})`, left: '50%', top: '50%' }} 
                 />
              ) : (
-                <span className="text-xl font-black text-white object-cover relative">
+                <span className={`${isInstantHomeLayout ? "text-[28px]" : "text-xl"} font-black text-white object-cover relative`}>
                   {(userProfileData.name !== "User" ? userProfileData.name : "U").trim().charAt(0).toUpperCase()}
                 </span>
              )}
@@ -1596,21 +1637,24 @@ const handleDestinationSearch = async (query: string) => {
           
           <motion.div 
             whileTap={{ scale: 0.95 }}
-            className="flex-1 flex flex-col items-center justify-center px-2 cursor-pointer active:opacity-70 group" 
+            className={`flex-1 flex flex-col items-center justify-center cursor-pointer active:opacity-70 group ${isInstantHomeLayout ? "px-1 text-center" : "px-2"}`} 
             onClick={() => detectLiveLocation(false)}
           >
-             <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-0.5 flex items-center gap-1 group-hover:scale-105 transition-transform"><MapPin size={12} className="fill-emerald-500/20"/> My Location</p>
-             <h2 className={`text-sm font-black text-gray-900 truncate max-w-[220px] text-center ${isRefreshingPickupLocation || pickup === 'Fetching Live Location...' ? 'animate-pulse' : ''}`}>{pickup}</h2>
+             <p className={`font-bold uppercase tracking-[0.18em] text-emerald-500 flex items-center gap-1 group-hover:scale-105 transition-transform ${isInstantHomeLayout ? "mb-1 text-[10px]" : "mb-0.5 text-[10px]"}`}><MapPin size={isInstantHomeLayout ? 13 : 12} className="fill-emerald-500/20"/> My Location</p>
+             <h2 className={`${isInstantHomeLayout ? "max-w-[255px] text-[15px] leading-[1.16]" : "max-w-[220px] text-sm"} whitespace-nowrap font-extrabold text-gray-900 truncate text-center ${isRefreshingPickupLocation || pickup === 'Fetching Live Location...' ? 'animate-pulse' : ''}`}>{pickup}</h2>
+             {isInstantHomeLayout && (
+               <p className="mt-1 text-center text-[11px] font-medium text-slate-500">{pickupAccuracyLabel}</p>
+             )}
           </motion.div>
   
           <motion.div
             whileTap={{ scale: 0.9 }}
             onClick={() => setShowVehiclePicker(true)} 
-            className={`w-12 h-12 rounded-full ${themeTheme.bgLight} border ${themeTheme.borderLight} shadow-soft flex items-center justify-center cursor-pointer transition-transform shrink-0 relative`}
+            className={`${isInstantHomeLayout ? "h-[58px] w-[58px] rounded-[20px]" : "w-12 h-12 rounded-full"} ${themeTheme.bgLight} border ${themeTheme.borderLight} shadow-soft flex items-center justify-center cursor-pointer transition-transform shrink-0 relative`}
           >
-             <span className="text-xl">{selectedVehicleDetails.emoji}</span>
-             <div className={`absolute -bottom-1 -right-1 w-5 h-5 ${themeTheme.bgSolid} rounded-full flex items-center justify-center border-2 border-white shadow-sm`}>
-               <ChevronRight size={12} className="text-white" />
+             <span className={`${isInstantHomeLayout ? "text-[28px]" : "text-xl"}`}>{selectedVehicleDetails.emoji}</span>
+             <div className={`absolute ${isInstantHomeLayout ? "bottom-0.5 right-0.5 h-6 w-6" : "-bottom-1 -right-1 w-5 h-5"} ${themeTheme.bgSolid} rounded-full flex items-center justify-center border-2 border-white shadow-sm`}>
+               <ChevronRight size={isInstantHomeLayout ? 12 : 12} className="text-white" />
              </div>
           </motion.div>
         </div>
@@ -1620,7 +1664,7 @@ const handleDestinationSearch = async (query: string) => {
 
       <AnimatePresence mode="wait">
         {bookingState === "form" && (
-          <motion.div key="form" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="space-y-4 pb-24">
+          <motion.div key="form" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="space-y-3 pb-24">
             
             {/* RIDE TYPE OR PICKUP TYPE BUTTONS */}
             {vehicleType === "BOLERO" && serviceMode === "Instant Ride" ? (
@@ -1637,26 +1681,54 @@ const handleDestinationSearch = async (query: string) => {
                  ))}
                </div>
             ) : (
-               <div className="bg-white/60  p-1.5 rounded-[20px] shadow-[0_8px_32px_rgba(0,0,0,0.05)] border border-white/80 flex items-center gap-2">
+               <div className={`${isInstantHomeLayout ? "min-h-[84px] rounded-[24px] border border-slate-100 bg-white p-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.045)]" : "bg-white/60 p-1.5 rounded-[20px] shadow-[0_8px_32px_rgba(0,0,0,0.05)] border border-white/80"} flex items-center gap-1.5`}>
                   <motion.button 
                     whileTap={{ scale: 0.96 }}
                     onClick={() => setJourneyType('oneway')}
-                    className={`flex-1 py-3.5 px-2 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${journeyType === 'oneway' ? `bg-white shadow-[0_4px_12px_rgba(0,0,0,0.06)] ${themeTheme.btnActiveText}` : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 transition-all flex items-center ${isInstantHomeLayout ? "min-h-[68px] rounded-[20px] px-3.5 py-2.5 justify-start text-left" : "justify-center gap-2 py-3.5 px-2 rounded-2xl text-xs"} font-bold ${journeyType === 'oneway' ? `${isInstantHomeLayout ? "border border-emerald-300 bg-emerald-50/60 shadow-[0_5px_12px_rgba(16,185,129,0.075)]" : "bg-white shadow-[0_4px_12px_rgba(0,0,0,0.06)]"} ${themeTheme.btnActiveText}` : `${isInstantHomeLayout ? "border border-transparent text-slate-700" : "text-gray-500 hover:text-gray-700"}`}`}
                   >
-                    <Navigation size={16} strokeWidth={2.5} className={journeyType === 'oneway' ? themeTheme.textLight : ''}/> One Way
+                    {isInstantHomeLayout ? (
+                      <>
+                        <div className="mr-3 flex h-9 w-9 items-center justify-center rounded-[14px] bg-white text-emerald-500 shadow-[0_3px_10px_rgba(15,23,42,0.06)]">
+                          <Navigation size={17} strokeWidth={2.5} className={journeyType === 'oneway' ? themeTheme.textLight : ''}/>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="whitespace-nowrap text-[12px] font-extrabold text-slate-900">One Way</span>
+                          <span className="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">Drop Only</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Navigation size={16} strokeWidth={2.5} className={journeyType === 'oneway' ? themeTheme.textLight : ''}/> One Way
+                      </>
+                    )}
                   </motion.button>
                   <motion.button 
                     whileTap={{ scale: 0.96 }}
                     onClick={() => setJourneyType('roundtrip')}
-                    className={`flex-1 py-3.5 px-2 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${journeyType === 'roundtrip' ? `bg-white shadow-[0_4px_12px_rgba(0,0,0,0.06)] ${themeTheme.btnActiveText}` : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 transition-all flex items-center ${isInstantHomeLayout ? "min-h-[68px] rounded-[20px] px-3.5 py-2.5 justify-start text-left" : "justify-center gap-2 py-3.5 px-2 rounded-2xl text-xs"} font-bold ${journeyType === 'roundtrip' ? `${isInstantHomeLayout ? "border border-emerald-300 bg-emerald-50/60 shadow-[0_5px_12px_rgba(16,185,129,0.075)]" : "bg-white shadow-[0_4px_12px_rgba(0,0,0,0.06)]"} ${themeTheme.btnActiveText}` : `${isInstantHomeLayout ? "border border-transparent text-slate-700" : "text-gray-500 hover:text-gray-700"}`}`}
                   >
-                    <CalendarDays size={16} strokeWidth={2.5} className={journeyType === 'roundtrip' ? themeTheme.textLight : ''}/> Round Trip
+                    {isInstantHomeLayout ? (
+                      <>
+                        <div className="mr-3 flex h-9 w-9 items-center justify-center rounded-[14px] bg-white text-slate-700 shadow-[0_3px_10px_rgba(15,23,42,0.06)]">
+                          <CalendarDays size={17} strokeWidth={2.4} className={journeyType === 'roundtrip' ? themeTheme.textLight : ''}/>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="whitespace-nowrap text-[12px] font-extrabold text-slate-900">Round Trip</span>
+                          <span className="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">Return</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <CalendarDays size={16} strokeWidth={2.5} className={journeyType === 'roundtrip' ? themeTheme.textLight : ''}/> Round Trip
+                      </>
+                    )}
                   </motion.button>
                </div>
             )}
 
             {/* LOCATION BOX: Glassmorphism */}
-            <div className={`bg-white/60  rounded-[28px] p-5 shadow-[0_8px_32px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus} transition-all duration-300 relative`}>
+            <div className={`${isInstantHomeLayout ? `${rectangularCardClass} min-h-[220px]` : `bg-white/60 rounded-[28px] p-5 shadow-[0_8px_32px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus}`} transition-all duration-300 relative`}>
                {vehicleType === "BOLERO" && serviceMode === "Instant Ride" ? (
                  <div className="flex flex-col gap-5 relative">
                    <div className={`absolute left-[16px] top-[24px] bottom-[32px] w-[2px] bg-gradient-to-b ${serviceMode === 'Instant Ride' ? 'from-emerald-200' : 'from-indigo-200'} to-gray-200 z-0`}></div>
@@ -1735,6 +1807,97 @@ const handleDestinationSearch = async (query: string) => {
                           ))}
                         </div>
                        )}
+                     </div>
+                   </div>
+                 </div>
+               ) : isInstantHomeLayout ? (
+                 <div className="relative">
+                   <div className="absolute left-5 top-7 bottom-8 w-px bg-gradient-to-b from-emerald-200 via-emerald-100 to-slate-200"></div>
+
+                   <div className="relative z-10 space-y-5">
+                     <div className="flex items-start gap-3.5">
+                       <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50/90 text-emerald-600 shadow-inner">
+                         <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(22,163,74,0.12)]"></div>
+                       </div>
+                       <div className="min-w-0 flex-1">
+                         <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-emerald-600">Pickup Point</p>
+                         <input
+                           value={pickup}
+                           onChange={(e) => setPickup(e.target.value)}
+                           className={`w-full truncate whitespace-nowrap bg-transparent text-[15px] font-extrabold leading-[1.18] text-slate-900 outline-none placeholder:text-slate-400 ${themeTheme.focusRing}`}
+                           placeholder="Fetching Live Location..."
+                         />
+                         <p className="mt-1.5 text-[11px] font-medium text-slate-500">{pickupAccuracyLabel}</p>
+                       </div>
+                       <button
+                         type="button"
+                         onClick={() => detectLiveLocation(false)}
+                         className={`${rectangularActionButtonClass} h-[42px] w-[42px] self-center`}
+                       >
+                         <Crosshair size={18} className="text-emerald-600" />
+                       </button>
+                     </div>
+
+                     <div className="ml-12 border-t border-slate-100"></div>
+
+                     <div className="flex items-start gap-3.5">
+                       <div
+                         className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 shadow-inner cursor-pointer"
+                         onClick={() => setIsDestinationMapOpen(true)}
+                       >
+                         <MapPin size={16} />
+                       </div>
+                       <div className="relative min-w-0 flex-1">
+                         <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-emerald-600">Destination</p>
+                         <input
+                           value={destination}
+                           onChange={(e) => handleDestinationSearch(e.target.value)}
+                           className={`w-full truncate whitespace-nowrap bg-transparent text-[16px] font-extrabold leading-[1.18] text-slate-900 outline-none placeholder:text-slate-400 ${themeTheme.focusRing}`}
+                           placeholder="Where to?"
+                         />
+                         <p className="mt-1.5 text-[11px] font-medium text-slate-500">
+                           {destinationSuggestions.length > 0 ? "Choose from search suggestions" : "Enter your destination"}
+                         </p>
+                         {destinationSuggestions.length > 0 && destination && (
+                           <div className="absolute bottom-full left-0 right-0 z-[100] mb-2 max-h-60 overflow-y-auto rounded-[22px] border border-slate-100 bg-white shadow-[0_-8px_32px_rgba(15,23,42,0.1)]">
+                             {destinationSuggestions.map((item: any, i) => (
+                               <div
+                                 key={i}
+                                 className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 transition-colors last:border-0 hover:bg-slate-50"
+                                 onClick={() => {
+                                   setDestination(item.primary_name);
+                                   setSelectedDistance(item.distance);
+                                   setDestinationCoords({ lat: item.lat, lng: item.lon });
+                                   setDestinationSuggestions([]);
+                                 }}
+                               >
+                                 <div className="flex min-w-0 items-center gap-3">
+                                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50">
+                                     <MapPin size={14} className="text-emerald-600" />
+                                   </div>
+                                   <div className="flex min-w-0 flex-1 flex-col">
+                                     <p className="mb-0.5 line-clamp-1 text-[15px] font-bold text-slate-900">{item.primary_name}</p>
+                                     <p className="truncate text-[11px] font-medium text-slate-500">{item.secondary_name}</p>
+                                   </div>
+                                 </div>
+                                 {item.distance !== null && (
+                                   <div className="shrink-0 border-l border-slate-100 pl-2 text-right">
+                                     <p className="mb-0.5 text-[9px] font-black uppercase tracking-wider text-slate-400">Dist</p>
+                                     <p className="text-[11px] font-bold text-slate-700">{item.distance} km</p>
+                                   </div>
+                                 )}
+                               </div>
+                             ))}
+                           </div>
+                         )}
+                       </div>
+                       <button
+                         type="button"
+                         onClick={() => setIsDestinationMapOpen(true)}
+                         className={`${rectangularActionButtonClass} h-[42px] w-[42px] self-center`}
+                       >
+                         <ArrowUpDown size={17} className="text-slate-700" />
+                       </button>
                      </div>
                    </div>
                  </div>
@@ -1855,16 +2018,17 @@ const handleDestinationSearch = async (query: string) => {
 
             {/* TIMING BOXES: Separated Containers */}
             <div className="flex flex-col gap-3">
-               <div className={`bg-white/60  rounded-2xl p-4 flex items-center justify-between shadow-[0_4px_16px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus}`}>
-                 <div className="flex items-center gap-3 flex-1">
-                   <div className={`w-10 h-10 rounded-full ${serviceMode === 'Instant Ride' ? 'bg-emerald-100/50' : 'bg-indigo-100/50'} flex items-center justify-center shadow-inner`}>
-                     <Clock size={16} className={themeTheme.text} />
+               <div className={`${isInstantHomeLayout ? `${rectangularCardClass} min-h-[118px]` : `bg-white/60 rounded-2xl p-4 shadow-[0_4px_16px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus}`} flex items-center justify-between`}>
+                 <div className="flex flex-1 items-center gap-3.5">
+                   <div className={`${isInstantHomeLayout ? "h-12 w-12 rounded-full bg-emerald-50" : `w-10 h-10 rounded-full ${serviceMode === 'Instant Ride' ? 'bg-emerald-100/50' : 'bg-indigo-100/50'}`} flex items-center justify-center shadow-inner`}>
+                     <Clock size={isInstantHomeLayout ? 21 : 16} className={themeTheme.text} />
                    </div>
                    <div className="flex-1">
-                     <p className={`text-[9px] uppercase font-bold ${themeTheme.text} tracking-widest mb-0.5 ml-1`}>Pickup Timing</p>
-                     <div onClick={() => setPickupOffset(0)} className="text-sm font-black text-gray-900 bg-transparent px-2 py-1 cursor-pointer select-none truncate max-w-[200px] hover:opacity-80 transition-opacity" title="Click to Reset Instantly">
+                     <p className={`${isInstantHomeLayout ? "mb-1 text-[11px] text-emerald-600 tracking-[0.24em]" : `text-[9px] ${themeTheme.text} tracking-widest mb-0.5 ml-1`} uppercase font-bold`}>Pickup Timing</p>
+                     <div onClick={() => setPickupOffset(0)} className={`${isInstantHomeLayout ? "text-[15px]" : "text-sm"} font-extrabold text-gray-900 bg-transparent cursor-pointer select-none truncate max-w-[200px] hover:opacity-80 transition-opacity`} title="Click to Reset Instantly">
                        {serviceMode === 'reserved' ? formatDateTime(new Date(reservedPickupAt)) : getPickupLabel()}
                      </div>
+                     {isInstantHomeLayout && <p className="mt-1.5 truncate whitespace-nowrap text-[11px] font-medium text-slate-500">{pickupOffset === 0 ? "Get a ride right away" : "After 30 minutes"}</p>}
                    </div>
                  </div>
                  {serviceMode === 'reserved' ? (
@@ -1879,6 +2043,19 @@ const handleDestinationSearch = async (query: string) => {
                        />
                      </div>
                    </div>
+                 ) : isInstantHomeLayout ? (
+                   <div className="flex flex-col items-center gap-1.5 pl-3">
+                     <div className="flex items-center gap-2.5">
+                       <button onClick={handlePickupOffsetDecrease} className={rectangularActionButtonClass}>
+                         <Minus size={18} strokeWidth={2.6} />
+                       </button>
+                       <div className="min-w-[66px] text-center text-[14px] font-extrabold text-slate-900">30 Min</div>
+                       <button onClick={handlePickupOffsetIncrease} className={rectangularActionButtonClass}>
+                         <Plus size={18} strokeWidth={2.6} className="text-emerald-600" />
+                       </button>
+                     </div>
+                     <p className="text-[11px] font-medium text-emerald-600">After 30 minutes</p>
+                   </div>
                  ) : (
                    <button onClick={handlePickupOffsetIncrease} className={`text-[10px] font-black ${themeTheme.text} px-3 py-1.5 rounded-lg ${themeTheme.bgLight} border ${themeTheme.borderLight} transition-all active:scale-90 shadow-sm whitespace-nowrap flex items-center gap-1`}>
                      <Plus size={12} strokeWidth={3} /> 30 Min
@@ -1887,33 +2064,55 @@ const handleDestinationSearch = async (query: string) => {
                </div>
 
                {journeyType === "roundtrip" && vehicleType !== "BOLERO" && (
-                 <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className={`bg-white/60  rounded-2xl p-4 shadow-[0_4px_16px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus} flex items-start gap-3`}>
-                   <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shadow-inner shrink-0">
-                      <CalendarDays size={16} className="text-gray-700" />
+                 <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className={`${isInstantHomeLayout ? `${rectangularCardClass} min-h-[150px]` : `bg-white/60 rounded-2xl p-4 shadow-[0_4px_16px_rgba(0,0,0,0.04)] border border-white ${themeTheme.shadowFocus}`} flex items-start gap-3.5`}>
+                   <div className={`${isInstantHomeLayout ? "h-12 w-12" : "w-10 h-10"} rounded-full bg-slate-100 flex items-center justify-center shadow-inner shrink-0`}>
+                      <CalendarDays size={isInstantHomeLayout ? 21 : 16} className="text-slate-700" />
                    </div>
                    <div className="flex-1 w-full">
-                     <div className="flex items-center justify-between mb-1.5 ml-1">
-                       <p className="text-[9px] uppercase font-bold text-gray-500 tracking-widest">Returning Time</p>
-                       <button onClick={addSixHoursToReturnTime} className={`text-[9px] font-black ${themeTheme.text} ${themeTheme.bgLight} border ${themeTheme.borderLight} px-2 py-0.5 rounded shadow-sm hover:scale-95 transition-transform`}>
-                         + 6 Hr
-                       </button>
-                     </div>
-                     <div className="relative">
-                       <input 
-                         value={returnTime} 
-                         onChange={(e) => setReturnTime(e.target.value)}
-                         className={`w-full text-sm font-black text-gray-900 bg-white/50 pl-3 pr-[40px] py-3 rounded-xl outline-none focus:ring-2 ${themeTheme.focusRing} transition-all border border-transparent focus:bg-white`}
-                         placeholder="DD:MM:YY::h:mm A"
-                       />
-                       <div className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md bg-white shadow-sm border border-gray-100 overflow-hidden cursor-pointer active:scale-95 transition-transform">
-                         <CalendarDays size={14} className={themeTheme.text} />
-                         <input 
-                           type="datetime-local" 
-                           onChange={handleNativeDateChange}
-                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                         />
+                     <div className={`flex ${isInstantHomeLayout ? "items-start" : "items-center"} justify-between ${isInstantHomeLayout ? "mb-4" : "mb-1.5 ml-1"}`}>
+                       <div>
+                         <p className={`${isInstantHomeLayout ? "text-[11px] tracking-[0.24em] text-emerald-600" : "text-[9px] text-gray-500 tracking-widest"} uppercase font-bold`}>Returning Time</p>
+                         <p className={`${isInstantHomeLayout ? "mt-1.5 truncate whitespace-nowrap text-[11px]" : "hidden"} font-medium text-slate-500`}>After reaching destination</p>
                        </div>
                      </div>
+                     {isInstantHomeLayout ? (
+                       <div className="space-y-2.5">
+                         <div className="flex items-center justify-center gap-5">
+                           <button onClick={() => shiftReturnTimeByHours(-3)} className={rectangularActionButtonClass}>
+                             <Minus size={18} strokeWidth={2.6} />
+                           </button>
+                           <div className="min-w-[92px] text-center text-[15px] font-extrabold text-slate-900">{getReturnHoursLabel()}</div>
+                           <button onClick={() => shiftReturnTimeByHours(3)} className={rectangularActionButtonClass}>
+                             <Plus size={18} strokeWidth={2.6} />
+                           </button>
+                         </div>
+                         <p className="text-center text-[11px] font-medium text-emerald-600">Return after {getReturnHoursLabel().toLowerCase()}</p>
+                         <div className="relative mx-auto h-0 w-0">
+                           <input
+                             type="datetime-local"
+                             onChange={handleNativeDateChange}
+                             className="absolute -top-6 left-0 h-12 w-12 cursor-pointer opacity-0"
+                           />
+                         </div>
+                       </div>
+                     ) : (
+                       <div className="relative">
+                         <input 
+                           value={returnTime} 
+                           onChange={(e) => setReturnTime(e.target.value)}
+                           className={`w-full text-sm font-black text-gray-900 bg-white/50 pl-3 pr-[40px] py-3 rounded-xl outline-none focus:ring-2 ${themeTheme.focusRing} transition-all border border-transparent focus:bg-white`}
+                           placeholder="DD:MM:YY::h:mm A"
+                         />
+                         <div className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md bg-white shadow-sm border border-gray-100 overflow-hidden cursor-pointer active:scale-95 transition-transform">
+                           <CalendarDays size={14} className={themeTheme.text} />
+                           <input 
+                             type="datetime-local" 
+                             onChange={handleNativeDateChange}
+                             className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                           />
+                         </div>
+                       </div>
+                     )}
                    </div>
                  </motion.div>
                )}
@@ -2118,9 +2317,17 @@ const handleDestinationSearch = async (query: string) => {
               whileTap={{ scale: 0.98 }}
               onClick={onShowPrice} 
               disabled={loading}
-              className={`w-full h-[64px] rounded-[24px] bg-gradient-to-r ${themeTheme.grad} text-white font-black text-lg ${themeTheme.shadowBtn} mt-2 flex items-center justify-center gap-2 border ${themeTheme.borderSolid} disabled:opacity-50`}
+              className={`w-full ${isInstantHomeLayout ? "min-h-[78px] rounded-[24px] flex-col" : "h-[64px] rounded-[24px]"} bg-gradient-to-r ${themeTheme.grad} text-white font-black text-lg ${themeTheme.shadowBtn} mt-2 flex items-center justify-center gap-1.5 border ${themeTheme.borderSolid} disabled:opacity-50`}
             >
-               {loading ? 'Calculating...' : <><Search size={20} strokeWidth={3} /> {serviceMode === 'Instant Ride' ? 'Search Ride' : `Show Price (${vehicleList.length} Vehicle${vehicleList.length > 1 ? 's' : ''})`}</>}
+               {loading ? 'Calculating...' : isInstantHomeLayout ? (
+                 <>
+                   <div className="flex items-center gap-2.5 text-[17px]">
+                     <Search size={21} strokeWidth={3} />
+                     <span>Search Ride</span>
+                   </div>
+                   <span className="text-[12px] font-medium text-white/80">Find nearby drivers for you</span>
+                 </>
+               ) : <><Search size={20} strokeWidth={3} /> {serviceMode === 'Instant Ride' ? 'Search Ride' : `Show Price (${vehicleList.length} Vehicle${vehicleList.length > 1 ? 's' : ''})`}</>}
             </motion.button>
           </motion.div>
         )}
@@ -2431,6 +2638,7 @@ const handleDestinationSearch = async (query: string) => {
           setIsDestinationMapOpen(false);
         }}
       />
+      </div>
     </div>
   );
 };

@@ -18,4 +18,5 @@ object RiderNotificationConstants {
     const val ALERT_TIMEOUT_MS = 20_000L
     const val ALERT_NOTIFICATION_ID = 44001
     const val ALERT_SERVICE_NOTIFICATION_ID = 44002
+    const val AVAILABILITY_SERVICE_NOTIFICATION_ID = 44003
 }

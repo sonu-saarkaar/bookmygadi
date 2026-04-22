@@ -28,16 +28,28 @@ import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import android.net.Uri
 import android.provider.Settings
+import android.content.SharedPreferences
 import android.webkit.JavascriptInterface
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import com.bookmygadi.core.domain.AuthRepository
+import com.bookmygadi.core.network.BookMyGadiApi
+import com.bookmygadi.rider.notifications.RiderAvailabilityService
+import com.bookmygadi.rider.notifications.RiderFcmRegistrar
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var api: BookMyGadiApi
+    @Inject lateinit var authRepository: AuthRepository
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 2001
@@ -51,6 +63,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var loadingLayout: FrameLayout
     private lateinit var errorLayout: FrameLayout
+    private lateinit var authPrefs: SharedPreferences
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val nativeActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -150,6 +164,9 @@ class MainActivity : ComponentActivity() {
         }
 
         ensureRequiredPermissions()
+        authPrefs = getSharedPreferences("bookmygadi_auth", Context.MODE_PRIVATE)
+        syncRiderPushRegistration()
+        ensureAvailabilityService()
 
         val root = FrameLayout(this)
         root.layoutParams = ViewGroup.LayoutParams(
@@ -190,6 +207,7 @@ class MainActivity : ComponentActivity() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     loadingLayout.visibility = View.GONE
+                    syncNativeTokenFromWebView()
                     triggerMapReflow(view)
                 }
 
@@ -294,14 +312,57 @@ class MainActivity : ComponentActivity() {
         })
     }
 
-    override fun onResume() { super.onResume(); webView.onResume() }
+    override fun onResume() {
+        super.onResume()
+        webView.onResume()
+        syncRiderPushRegistration()
+        ensureAvailabilityService()
+    }
+
     override fun onPause() { super.onPause(); webView.onPause() }
     override fun onDestroy() {
         try {
             unregisterReceiver(nativeActionReceiver)
         } catch (e: Exception) {}
+        appScope.cancel()
         webView.destroy()
         super.onDestroy()
+    }
+
+    private fun syncRiderPushRegistration() {
+        RiderFcmRegistrar.syncCurrentToken(authRepository, api, appScope)
+    }
+
+    private fun syncNativeTokenFromWebView() {
+        if (!::webView.isInitialized || !::authPrefs.isInitialized) return
+        webView.evaluateJavascript(
+            "(function(){try{return window.localStorage.getItem('bmg_access_token') || '';}catch(e){return '';}})();",
+        ) { rawValue ->
+            val token = rawValue
+                ?.removePrefix("\"")
+                ?.removeSuffix("\"")
+                ?.replace("\\u003C", "<")
+                ?.replace("\\n", "")
+                ?.replace("\\\"", "\"")
+                ?.trim()
+                .orEmpty()
+
+            if (token.isBlank()) return@evaluateJavascript
+            val bearerToken = if (token.startsWith("Bearer ")) token else "Bearer $token"
+            if (authPrefs.getString("auth_token", null) != bearerToken) {
+                authPrefs.edit().putString("auth_token", bearerToken).apply()
+            }
+            syncRiderPushRegistration()
+            ensureAvailabilityService()
+        }
+    }
+
+    private fun ensureAvailabilityService() {
+        if (authRepository.getToken().isNullOrBlank()) return
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, RiderAvailabilityService::class.java),
+        )
     }
 
     private fun openAppSettings() {

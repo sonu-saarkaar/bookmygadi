@@ -39,6 +39,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
+        RiderFcmRegistrar.syncCurrentToken(authRepository, api, serviceScope)
         val data = remoteMessage.data
         if (data.isEmpty()) return
 
@@ -111,6 +112,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
             .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(fullScreenPendingIntent)
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .addAction(0, "Reject", rejectIntent)
             .addAction(0, "Accept", acceptIntent)

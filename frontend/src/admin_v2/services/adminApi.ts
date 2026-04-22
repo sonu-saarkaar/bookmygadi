@@ -53,6 +53,14 @@ async function requestV1<T>(path: string, init: RequestInit = {}, withAuth = tru
   return response.json() as Promise<T>;
 }
 
+const buildAdminEmailCandidates = (email: string) => {
+  const normalized = String(email || "").trim().toLowerCase();
+  const candidates = [normalized];
+  if (normalized === "admin@bookmygadi.app") candidates.push("admin@bookmygadi.com");
+  if (normalized === "admin@bookmygadi.com") candidates.push("admin@bookmygadi.app");
+  return [...new Set(candidates.filter(Boolean))];
+};
+
 function mapRideToOps(row: any) {
   return {
     id: row.id,
@@ -98,23 +106,52 @@ export const adminV2Api = {
   seedAdmins: async () => ({ seeded: true, message: "Using existing admin users" }),
   seedData: async () => ({ ok: true }),
   login: async (email: string, password: string) => {
-    const token = await requestV1<{ access_token: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }, false);
-    const me = await fetch(`${ADMIN_V1_API_BASE}/auth/me`, {
-      headers: { Authorization: `Bearer ${token.access_token}` },
-    }).then((r) => r.json());
-    if (me?.role !== "admin") {
-      throw new Error("Only admin users can access admin console");
+    let lastError: Error | null = null;
+    for (const candidateEmail of buildAdminEmailCandidates(email)) {
+      try {
+        const token = await requestV1<{ access_token: string }>("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: candidateEmail, password }),
+        }, false);
+        const me = await fetch(`${ADMIN_V1_API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        }).then((r) => r.json());
+        if (me?.role !== "admin") {
+          throw new Error("Only admin users can access admin console");
+        }
+        return { access_token: token.access_token, role: "admin", name: me.name || "Admin", email: candidateEmail };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Login failed");
+      }
     }
-    return { access_token: token.access_token, role: "admin", name: me.name || "Admin" };
+    throw lastError || new Error("Login failed");
   },
-  adminForgotPasswordStart: (email: string) =>
-    requestV1<{ message: string }>("/auth/admin/forgot-password/start", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }, false),
+  adminForgotPasswordStart: async (email: string) => {
+    const candidates = buildAdminEmailCandidates(email);
+    let lastError: Error | null = null;
+    for (const candidateEmail of candidates) {
+      try {
+        return await requestV1<{ message: string }>("/auth/admin/forgot-password/start", {
+          method: "POST",
+          body: JSON.stringify({ email: candidateEmail }),
+        }, false);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("Unable to start password reset");
+        lastError = err;
+        if (!/404|Not Found/i.test(err.message)) continue;
+        try {
+          await requestV1<{ message: string }>("/auth/forgot-password", {
+            method: "POST",
+            body: JSON.stringify({ email_or_mobile: candidateEmail }),
+          }, false);
+          return { message: `Password reset requested for ${candidateEmail}. If SMTP is configured, check inbox. Live OTP reset may need latest backend deploy.` };
+        } catch (fallbackError) {
+          lastError = fallbackError instanceof Error ? fallbackError : err;
+        }
+      }
+    }
+    throw lastError || new Error("Unable to start password reset");
+  },
   adminForgotPasswordVerify: (email: string, otp: string, new_password: string) =>
     requestV1<{ message: string }>("/auth/admin/forgot-password/verify", {
       method: "POST",

@@ -46,6 +46,7 @@ export const AdminV2PanelPage = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<RiderRegistrationItem[]>([]);
+  const [allRegistrations, setAllRegistrations] = useState<RiderRegistrationItem[]>([]);
   const [registrationStatus, setRegistrationStatus] = useState("pending");
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string>("");
   const [registrationDraft, setRegistrationDraft] = useState<Partial<RiderRegistrationItem> | null>(null);
@@ -171,6 +172,7 @@ export const AdminV2PanelPage = () => {
       adminV2Api.listTasks(),
       adminV2Api.logs(),
       adminV2Api.listAllServices(),
+      adminV2Api.listRiderRegistrations(),
     ]);
 
     const valueOr = <T,>(index: number, fallback: T): T => {
@@ -189,6 +191,7 @@ export const AdminV2PanelPage = () => {
     setFinance(valueOr(8, { rows: [] }));
     setTasks(valueOr(9, []));
     setLogs(valueOr(10, []));
+    setAllRegistrations(valueOr(12, []));
 
     loadRegistrations();
 
@@ -320,7 +323,7 @@ export const AdminV2PanelPage = () => {
       </div>
     );
     if (module === "users-mgmt") return <UserManagementBoard />;
-    if (module === "rider-mgmt") return <RiderManagementBoard />;
+    if (module === "rider-mgmt") return <RiderManagementBoard drivers={drivers} registrations={allRegistrations} onRefresh={refreshAll} />;
     if (module === "rides") return <LiveRidesBoard />;
     if (module === "live-search") return <LiveSearchMonitorBoard />;
     if (module === "services") return <ServiceManagementBoard />;

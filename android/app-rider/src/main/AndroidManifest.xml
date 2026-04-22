@@ -61,6 +61,11 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <service
+            android:name=".notifications.RiderAvailabilityService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".notifications.RideNotificationActionService"
             android:exported="false" />
 
