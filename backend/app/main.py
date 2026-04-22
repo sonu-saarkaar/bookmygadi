@@ -1,8 +1,13 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from collections import defaultdict, deque
+import time
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
+from app.api.admin_enterprise import router as admin_enterprise_router
 from app.api.pricing import router as pricing_router
 from app.api.payment import router as payment_router
 from app.api.realtime import realtime_manager
@@ -89,6 +94,8 @@ def ensure_schema_updates() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT 0"))
         if user_cols and "driver_status" not in user_col_names:
             conn.execute(text("ALTER TABLE users ADD COLUMN driver_status VARCHAR"))
+        if user_cols and "public_id" not in user_col_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN public_id VARCHAR(30)"))
 
         # Create service_metadata if not exists
         conn.execute(text("""
@@ -130,7 +137,19 @@ def ensure_schema_updates() -> None:
                     conn.execute(text(f"ALTER TABLE admin_support_tickets ADD COLUMN {col} {ctype}"))
 
 
+def ensure_reserve_price_columns() -> None:
+    """Add price_6h to reserve_route_prices if missing."""
+    with engine.begin() as conn:
+        cols = conn.execute(text("PRAGMA table_info(reserve_route_prices)")).fetchall()
+        col_names = {row[1] for row in cols}
+        if cols and "price_6h" not in col_names:
+            conn.execute(text("ALTER TABLE reserve_route_prices ADD COLUMN price_6h INTEGER"))
+        if cols and "price_24h" not in col_names:
+            conn.execute(text("ALTER TABLE reserve_route_prices ADD COLUMN price_24h INTEGER"))
+
+
 ensure_schema_updates()
+ensure_reserve_price_columns()
 
 
 def seed_demo_users() -> None:
@@ -147,12 +166,12 @@ def seed_demo_users() -> None:
                 )
             )
 
-        admin = db.query(User).filter(User.email == "admin@bookmygadi.com").first()
+        admin = db.query(User).filter(User.email == "admin@bookmygadi.app").first()
         if not admin:
             db.add(
                 User(
                     name="Admin",
-                    email="admin@bookmygadi.com",
+                    email="admin@bookmygadi.app",
                     phone="8888888888",
                     role="admin",
                     password_hash=get_password_hash("admin123"),
@@ -171,6 +190,53 @@ def seed_demo_users() -> None:
                 )
             )
 
+        db.commit()
+
+        # Backward compatibility for older default admin email.
+        legacy_admin = db.query(User).filter(User.email == "admin@bookmygadi.com").first()
+        if not legacy_admin:
+            db.add(
+                User(
+                    name="Legacy Admin",
+                    email="admin@bookmygadi.com",
+                    phone="8888888888",
+                    role="admin",
+                    password_hash=get_password_hash("admin123"),
+                )
+            )
+            db.commit()
+
+        # Generate stable platform IDs (BMG-USER/BMG-RIDER/BMG-ADMIN).
+        users = db.query(User).order_by(User.created_at.asc()).all()
+        counters = {"customer": 0, "driver": 0, "admin": 0}
+        existing_ids = {u.public_id for u in users if u.public_id}
+        for pid in existing_ids:
+            try:
+                part = str(pid).split("-")
+                if len(part) != 3:
+                    continue
+                kind, num = part[1], int(part[2])
+                if kind == "USER":
+                    counters["customer"] = max(counters["customer"], num)
+                elif kind == "RIDER":
+                    counters["driver"] = max(counters["driver"], num)
+                elif kind == "ADMIN":
+                    counters["admin"] = max(counters["admin"], num)
+            except Exception:
+                continue
+        for u in users:
+            if u.role not in counters:
+                continue
+            if u.public_id:
+                continue
+            counters[u.role] += 1
+            prefix = "USER" if u.role == "customer" else "RIDER" if u.role == "driver" else "ADMIN"
+            candidate = f"BMG-{prefix}-{counters[u.role]:03d}"
+            while candidate in existing_ids:
+                counters[u.role] += 1
+                candidate = f"BMG-{prefix}-{counters[u.role]:03d}"
+            u.public_id = candidate
+            existing_ids.add(candidate)
         db.commit()
 
 
@@ -291,9 +357,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+
+
+@app.middleware("http")
+async def basic_rate_limiter(request: Request, call_next):
+    path = request.url.path or ""
+    protected = path.startswith(f"{settings.api_prefix}/auth") or path.startswith(f"{settings.api_prefix}/admin")
+    if protected:
+        key = f"{request.client.host if request.client else 'unknown'}:{path}"
+        now = time.time()
+        dq = _rate_buckets[key]
+        while dq and now - dq[0] > 60:
+            dq.popleft()
+        if len(dq) >= 180:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Please retry shortly."})
+        dq.append(now)
+    return await call_next(request)
+
 app.include_router(system_router)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
+app.include_router(admin_enterprise_router, prefix=settings.api_prefix)
 app.include_router(services_router, prefix=settings.api_prefix)
 app.include_router(rides_router, prefix=settings.api_prefix)
 app.include_router(vehicles_router, prefix=settings.api_prefix)

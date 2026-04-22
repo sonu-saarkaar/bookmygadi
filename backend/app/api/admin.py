@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -37,6 +38,10 @@ from app.schemas import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 APP_START_TS = time.time()
 ACTIVE_RIDE_STATUSES = {"accepted", "arriving", "in_progress"}
+
+
+class RiderBlockPayload(BaseModel):
+    reason: str | None = None
 
 
 def _log_admin_action(db: Session, admin: User, module: str, action: str, status: str = "success") -> None:
@@ -457,6 +462,7 @@ def admin_riders(
 @router.patch("/riders/{user_id}/block", response_model=dict)
 def admin_block_rider(
     user_id: str,
+    payload: RiderBlockPayload | None = None,
     admin: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -464,6 +470,7 @@ def admin_block_rider(
     if not row or row.role != "customer":
         raise HTTPException(status_code=404, detail="Rider not found")
     row.is_blocked = True
+    row.blocked_reason = (payload.reason if payload else None) or "Blocked by admin"
     _log_admin_action(db, admin, "riders", f"Blocked rider {row.id}", "warning")
     db.commit()
     return {"ok": True}

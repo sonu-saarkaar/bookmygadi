@@ -220,6 +220,7 @@ export interface ReserveRoutePrice {
   route_from: string;
   route_to: string;
   vehicle_type: string;
+  price_6h: number;
   price_12h: number;
   price_24h: number;
   is_active: boolean;
@@ -717,8 +718,9 @@ export const backendApi = {
       route_from: string;
       route_to: string;
       vehicle_type: string;
+      price_6h?: number | null;
       price_12h: number;
-      price_24h: number;
+      price_24h?: number | null;
       is_active?: boolean;
     },
     token: string,
@@ -729,6 +731,7 @@ export const backendApi = {
       route_from: string;
       route_to: string;
       vehicle_type: string;
+      price_6h: number;
       price_12h: number;
       price_24h: number;
       is_active: boolean;

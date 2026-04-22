@@ -522,8 +522,9 @@ class ReserveRoutePriceCreate(BaseModel):
     route_from: str
     route_to: str
     vehicle_type: str = "car"
+    price_6h: int | None = Field(default=None, ge=1)
     price_12h: int = Field(ge=1)
-    price_24h: int = Field(ge=1)
+    price_24h: int | None = Field(default=None, ge=1)
     is_active: bool = True
 
 
@@ -531,6 +532,7 @@ class ReserveRoutePriceUpdate(BaseModel):
     route_from: str | None = None
     route_to: str | None = None
     vehicle_type: str | None = None
+    price_6h: int | None = Field(default=None, ge=1)
     price_12h: int | None = Field(default=None, ge=1)
     price_24h: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
@@ -544,6 +546,7 @@ class ReserveRoutePriceRead(BaseModel):
     route_from: str
     route_to: str
     vehicle_type: str
+    price_6h: int
     price_12h: int
     price_24h: int
     is_active: bool

@@ -9,7 +9,9 @@ const menuGroups = [
     items: [
       { key: "dashboard", label: "Dashboard", icon: Lucide.LayoutDashboard },
       { key: "rides", label: "Live Rides", icon: Lucide.Navigation },
+      { key: "live-search", label: "Live Search Monitor", icon: Lucide.Search },
       { key: "services", label: "Service Management", icon: Lucide.Settings2 },
+      { key: "price-mgmt", label: "Price Management", icon: Lucide.IndianRupee },
     ],
   },
   {
@@ -22,11 +24,14 @@ const menuGroups = [
     title: "Rider Panel",
     items: [
       { key: "rider-mgmt", label: "Rider Management System", icon: Lucide.UsersRound },
+      { key: "registrations", label: "Vehicle KYC Approvals", icon: Lucide.ClipboardCheck },
     ],
   },
   {
     title: "Team & Support",
     items: [
+      { key: "team-mgmt", label: "Team Management", icon: Lucide.Users2 },
+      { key: "company-structure", label: "Company Structure", icon: Lucide.Building2 },
       { key: "tasks", label: "Team Tasks", icon: Lucide.ClipboardList },
       { key: "support", label: "Support Desk", icon: Lucide.Headset },
     ],
@@ -35,6 +40,7 @@ const menuGroups = [
     title: "System Control",
     items: [
       { key: "finance", label: "Finance", icon: Lucide.IndianRupee },
+      { key: "policies", label: "Policy Management", icon: Lucide.FileText },
       { key: "logs", label: "System Logs", icon: Lucide.History },
     ],
   },
@@ -68,7 +74,7 @@ export const AdminSidebarV2 = () => {
                 >
                   <item.icon size={18} strokeWidth={module === item.key ? 2.5 : 2} className={module === item.key ? "text-emerald-400" : "text-slate-400"} />
                   <span>{item.label}</span>
-                  {item.key === "approvals" && <span className="ml-auto w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
+                  {item.key === "registrations" && <span className="ml-auto w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
                 </button>
               ))}
             </div>
@@ -80,10 +86,15 @@ export const AdminSidebarV2 = () => {
 };
 
 export const AdminTopbarV2 = ({ onLogout }: { onLogout: () => void }) => {
-  const { query, setQuery, role, name } = useAdminV2Store();
+  const { query, setQuery, role, name, module, setModule } = useAdminV2Store();
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
       <div className="flex flex-wrap items-center gap-2">
+        <select value={module} onChange={(e) => setModule(e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm bg-white lg:hidden">
+          {menuGroups.flatMap((group) => group.items).map((item) => (
+            <option key={item.key} value={item.key}>{item.label}</option>
+          ))}
+        </select>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search rides, riders, drivers, tickets" className="h-10 min-w-[220px] flex-1 rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500" />
         <Chip text={role ? `Role: ${role}` : "Role: -"} tone="neutral" />
         <Chip text={name ? `Admin: ${name}` : "Admin: -"} tone="success" />

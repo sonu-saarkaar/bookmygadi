@@ -73,45 +73,35 @@ Write-Info "Freeing ports $API_PORT and $WEB_PORT"
 Stop-PortProcess -Port $API_PORT
 Stop-PortProcess -Port $WEB_PORT
 
-Write-Info "Updating frontend/.env.android"
-$envAndroid = @"
-VITE_API_BASE_URL="$apiUrl"
+Write-Info "Updating frontend/.env"
+$envContent = @"
+VITE_API_URL="$apiUrl"
 VITE_GOOGLE_MAPS_API_KEY="AIzaSyDAfy7Rud99gcPIUWLnRZ-Prc4oooGbQu8"
 "@
-Set-Content -Path (Join-Path $FRONT ".env.android") -Value $envAndroid -Encoding UTF8
+Set-Content -Path (Join-Path $FRONT ".env") -Value $envContent -Encoding UTF8
 
 $localPropPath = Join-Path $ANDROID "local.properties"
-if (Test-Path $localPropPath) {
-    Write-Info "Updating android/local.properties"
-    $lp = Get-Content $localPropPath -Raw
-    if ($lp -match "(?m)^SERVER_IP=") {
-        $lp = $lp -replace "(?m)^SERVER_IP=.*$", "SERVER_IP=$lanIp"
-    } else {
-        $lp += "`nSERVER_IP=$lanIp"
-    }
-
-    if ($lp -match "(?m)^WEB_PORT=") {
-        $lp = $lp -replace "(?m)^WEB_PORT=.*$", "WEB_PORT=$WEB_PORT"
-    } else {
-        $lp += "`nWEB_PORT=$WEB_PORT"
-    }
-
-    if ($lp -match "(?m)^API_PORT=") {
-        $lp = $lp -replace "(?m)^API_PORT=.*$", "API_PORT=$API_PORT"
-    } else {
-        $lp += "`nAPI_PORT=$API_PORT"
-    }
-
-    if ($lp -match "(?m)^PUBLIC_API_URL=") {
-        $lp = $lp -replace "(?m)^PUBLIC_API_URL=.*$", "PUBLIC_API_URL="
-    }
-
-    if ($lp -match "(?m)^PUBLIC_WEB_URL=") {
-        $lp = $lp -replace "(?m)^PUBLIC_WEB_URL=.*$", "PUBLIC_WEB_URL="
-    }
-
-    Set-Content -Path $localPropPath -Value $lp -Encoding UTF8
+if (-not (Test-Path $localPropPath)) {
+    Write-Info "Creating android/local.properties"
+    "sdk.dir=$(Get-Location)/android/sdk`n" | Set-Content $localPropPath
 }
+
+Write-Info "Updating android/local.properties"
+$lp = Get-Content $localPropPath -Raw
+foreach ($key in @("SERVER_IP", "BACKEND_PORT", "FRONTEND_PORT")) {
+    $val = if ($key -eq "SERVER_IP") { $lanIp } elseif ($key -eq "BACKEND_PORT") { $API_PORT } else { $WEB_PORT }
+    if ($lp -match "(?m)^#?$key=") {
+        $lp = $lp -replace "(?m)^#?$key=.*$", "$key=$val"
+    } else {
+        $lp += "`n$key=$val"
+    }
+}
+
+Set-Content -Path $localPropPath -Value $lp -Encoding UTF8
+
+Write-Info "Updating backend/.env"
+$backendEnv = "CORS_ORIGINS=[""http://localhost:5173"", ""http://$($lanIp):5173"", ""http://127.0.0.1:5173""]"
+Set-Content -Path (Join-Path $BACK ".env") -Value $backendEnv -Encoding UTF8
 
 Write-Info "Starting backend on 0.0.0.0:$API_PORT"
 $backend = Start-Process -FilePath "powershell.exe" -ArgumentList @(

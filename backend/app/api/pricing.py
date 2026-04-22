@@ -1,3 +1,4 @@
+from datetime import datetime
 from math import atan2, cos, radians, sin, sqrt
 from statistics import mean
 
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_admin_user, get_current_user
 from app.db import get_db
-from app.models import ReserveDefaultRate, ReserveRoutePrice, Ride, RiderApiKey, RoutePriceRule, User, VehiclePriceModifier
+from app.models import ReserveDefaultRate, ReserveRoutePrice, Ride, RideSearchEvent, RiderApiKey, RoutePriceRule, User, VehiclePriceModifier
 from app.schemas import (
     NearbyRiderRead,
     PricingQuoteRead,
@@ -54,14 +55,65 @@ def _route_match(route_from: str, route_to: str, pickup_area: str, destination_a
     return (rf in pa and rt in da) or (rf in da and rt in pa)
 
 
+def _auto_discount_for_6h(price_12h: int) -> int:
+    # Keep reserve short-hour discount realistic (not exact half): 200 to 500.
+    return max(200, min(500, int(round(price_12h * 0.14))))
+
+
+def _auto_increase_for_24h(price_12h: int) -> int:
+    # Keep reserve long-hour increase realistic: 300 to 700.
+    return max(300, min(700, int(round(price_12h * 0.22))))
+
+
+def _derive_time_prices(price_12h: int, price_6h: int | None, price_24h: int | None) -> tuple[int, int, int]:
+    p12 = max(1, int(price_12h))
+    p6 = int(price_6h) if price_6h is not None and int(price_6h) > 0 else max(1, p12 - _auto_discount_for_6h(p12))
+    p24 = int(price_24h) if price_24h is not None and int(price_24h) > 0 else p12 + _auto_increase_for_24h(p12)
+
+    if p6 >= p12:
+        p6 = max(1, p12 - 200)
+    if p24 <= p12:
+        p24 = p12 + 300
+    return p6, p12, p24
+
+
+def _ensure_time_prices(row: ReserveRoutePrice) -> bool:
+    p6, p12, p24 = _derive_time_prices(row.price_12h, row.price_6h, row.price_24h)
+    changed = False
+    if row.price_6h != p6:
+        row.price_6h = p6
+        changed = True
+    if row.price_12h != p12:
+        row.price_12h = p12
+        changed = True
+    if row.price_24h != p24:
+        row.price_24h = p24
+        changed = True
+    return changed
+
+
 def _price_for_duration(row: ReserveRoutePrice, duration_hours: int) -> int:
-    if duration_hours <= 12:
-        return row.price_12h
-    if duration_hours >= 24:
-        return row.price_24h
-    # linear interpolation between 12h and 24h
-    ratio = (duration_hours - 12) / 12
-    return int(round(row.price_12h + (row.price_24h - row.price_12h) * ratio))
+    p6, p12, p24 = _derive_time_prices(row.price_12h, row.price_6h, row.price_24h)
+    if duration_hours <= 6:
+        return p6
+    if duration_hours == 12:
+        return p12
+    if duration_hours == 24:
+        return p24
+    if duration_hours < 12:
+        # Non-linear scale 6h->12h (not direct half logic).
+        ratio = (duration_hours - 6) / 6
+        eased = ratio ** 0.85
+        return int(round(p6 + (p12 - p6) * eased))
+    if duration_hours < 24:
+        ratio = (duration_hours - 12) / 12
+        eased = ratio ** 1.08
+        return int(round(p12 + (p24 - p12) * eased))
+
+    # Above 24h keep escalating with realistic 6-hour blocks.
+    extra_hours = duration_hours - 24
+    per_6h_bump = max(300, min(700, p24 - p12))
+    return int(round(p24 + (extra_hours / 6) * per_6h_bump))
 
 
 def _latest_driver_location(db: Session, driver_id: str) -> tuple[float | None, float | None]:
@@ -154,6 +206,22 @@ def get_quote(
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PricingQuoteRead:
+    try:
+        db.add(
+            RideSearchEvent(
+                user_id=_user.id,
+                pickup_location=pickup_area,
+                drop_location=destination_area,
+                search_mode="instant",
+                vehicle_type=vehicle_type.lower(),
+                status="searching",
+                search_started_at=datetime.utcnow(),
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
     route_rule = _find_route_rule(db, pickup_area, destination_area)
     vehicle_mod = _get_vehicle_modifier(db, vehicle_type)
 
@@ -391,6 +459,22 @@ def get_reserve_quote(
     if pickup_lat is None or pickup_lng is None:
         raise HTTPException(status_code=400, detail="Pickup coordinates required for reserve radius search")
 
+    try:
+        db.add(
+            RideSearchEvent(
+                user_id=current_user.id,
+                pickup_location=pickup_area,
+                drop_location=destination_area,
+                search_mode="reserve",
+                vehicle_type=vehicle_type.lower(),
+                status="searching",
+                search_started_at=datetime.utcnow(),
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
     prices = (
         db.query(ReserveRoutePrice)
         .filter(ReserveRoutePrice.is_active.is_(True), ReserveRoutePrice.vehicle_type == vehicle_type.lower())
@@ -480,12 +564,16 @@ def get_reserve_quote(
 def list_my_reserve_prices(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[ReserveRoutePriceRead]:
     if current_user.role != "driver":
         raise HTTPException(status_code=403, detail="Driver access required")
-    return (
+    rows = (
         db.query(ReserveRoutePrice)
         .filter(ReserveRoutePrice.driver_id == current_user.id)
         .order_by(ReserveRoutePrice.created_at.desc())
         .all()
     )
+    changed = any(_ensure_time_prices(r) for r in rows)
+    if changed:
+        db.commit()
+    return rows
 
 
 @router.post("/reserve/driver-prices", response_model=ReserveRoutePriceRead, status_code=status.HTTP_201_CREATED)
@@ -496,7 +584,17 @@ def create_my_reserve_price(
 ) -> ReserveRoutePriceRead:
     if current_user.role != "driver":
         raise HTTPException(status_code=403, detail="Driver access required")
-    row = ReserveRoutePrice(driver_id=current_user.id, **payload.model_dump(), vehicle_type=payload.vehicle_type.lower())
+    p6, p12, p24 = _derive_time_prices(payload.price_12h, payload.price_6h, payload.price_24h)
+    row = ReserveRoutePrice(
+        driver_id=current_user.id,
+        route_from=payload.route_from,
+        route_to=payload.route_to,
+        vehicle_type=payload.vehicle_type.lower(),
+        price_6h=p6,
+        price_12h=p12,
+        price_24h=p24,
+        is_active=payload.is_active,
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -517,8 +615,10 @@ def update_my_reserve_price(
         raise HTTPException(status_code=404, detail="Reserve price not found")
     if row.driver_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    incoming = payload.model_dump(exclude_unset=True)
+    for key, value in incoming.items():
         setattr(row, key, value.lower() if key == "vehicle_type" and isinstance(value, str) else value)
+    _ensure_time_prices(row)
     db.commit()
     db.refresh(row)
     return row
@@ -529,7 +629,56 @@ def list_all_reserve_prices(
     _admin: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> list[ReserveRoutePriceRead]:
-    return db.query(ReserveRoutePrice).order_by(ReserveRoutePrice.created_at.desc()).all()
+    rows = db.query(ReserveRoutePrice).order_by(ReserveRoutePrice.created_at.desc()).all()
+    changed = any(_ensure_time_prices(r) for r in rows)
+    if changed:
+        db.commit()
+    return rows
+
+
+@router.post("/reserve/admin/driver-prices", response_model=ReserveRoutePriceRead, status_code=status.HTTP_201_CREATED)
+def admin_create_driver_price(
+    payload: ReserveRoutePriceCreate,
+    driver_id: str = Query(...),
+    _admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+) -> ReserveRoutePriceRead:
+    driver = db.get(User, driver_id)
+    if not driver or driver.role != "driver":
+        raise HTTPException(status_code=404, detail="Driver not found")
+    p6, p12, p24 = _derive_time_prices(payload.price_12h, payload.price_6h, payload.price_24h)
+    row = ReserveRoutePrice(
+        driver_id=driver_id,
+        route_from=payload.route_from,
+        route_to=payload.route_to,
+        vehicle_type=payload.vehicle_type.lower(),
+        price_6h=p6,
+        price_12h=p12,
+        price_24h=p24,
+        is_active=payload.is_active,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.put("/reserve/admin/driver-prices/{price_id}", response_model=ReserveRoutePriceRead)
+def admin_update_driver_price(
+    price_id: str,
+    payload: ReserveRoutePriceUpdate,
+    _admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+) -> ReserveRoutePriceRead:
+    row = db.get(ReserveRoutePrice, price_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Reserve price not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, key, value.lower() if key == "vehicle_type" and isinstance(value, str) else value)
+    _ensure_time_prices(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.get("/reserve/default-rates", response_model=list[ReserveDefaultRateRead])

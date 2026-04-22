@@ -9,33 +9,40 @@ plugins {
 android {
     namespace = "com.bookmygadi.user"
     compileSdk = 34
+
+    val props = com.android.build.gradle.internal.cxx.configure.gradleLocalProperties(rootDir, providers)
+    val serverIp = props.getProperty("SERVER_IP", "10.0.2.2")
+    val backendPort = props.getProperty("BACKEND_PORT", "8000")
+    val frontendPort = props.getProperty("FRONTEND_PORT", "5173")
+    val devApiOrigin = props.getProperty("DEV_API_ORIGIN", "http://$serverIp:$backendPort")
+    val devWsOrigin = props.getProperty("DEV_WS_ORIGIN", "ws://$serverIp:$backendPort")
+    val devWebOrigin = props.getProperty("DEV_WEB_ORIGIN", "http://$serverIp:$frontendPort")
+    val prodApiOrigin = props.getProperty("PROD_API_ORIGIN", "https://api.bookmygadi.app")
+    val prodWebOrigin = props.getProperty("PROD_WEB_ORIGIN", "https://bookmygadi.app")
+
     defaultConfig {
         applicationId = "com.bookmygadi.user"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        val props = com.android.build.gradle.internal.cxx.configure.gradleLocalProperties(rootDir, providers)
-        val serverIp      = props.getProperty("SERVER_IP",      "10.0.2.2")
-
-        buildConfigField("String", "SERVER_IP",  "\"$serverIp\"")
+        buildConfigField("String", "SERVER_IP", "\"$serverIp\"")
     }
     
     buildTypes {
         getByName("debug") {
-            buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8000\"")
-            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000/api/v1\"")
-            buildConfigField("String", "WS_BASE_URL", "\"ws://10.0.2.2:8000\"")
-            buildConfigField("String", "WEB_BASE_URL", "\"http://10.0.2.2:5173\"")
+            buildConfigField("String", "BASE_URL", "\"$devApiOrigin\"")
+            buildConfigField("String", "API_BASE_URL", "\"$devApiOrigin/api/v1\"")
+            buildConfigField("String", "WS_BASE_URL", "\"$devWsOrigin\"")
+            buildConfigField("String", "WEB_BASE_URL", "\"$devWebOrigin\"")
         }
         getByName("release") {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "BASE_URL", "\"https://api.bookmygadi.app\"")
-            buildConfigField("String", "API_BASE_URL", "\"https://api.bookmygadi.app/api/v1\"")
-            buildConfigField("String", "WS_BASE_URL", "\"wss://api.bookmygadi.app\"")
-            buildConfigField("String", "WEB_BASE_URL", "\"https://bookmygadi.app\"")
+            buildConfigField("String", "BASE_URL", "\"$prodApiOrigin\"")
+            buildConfigField("String", "API_BASE_URL", "\"$prodApiOrigin/api/v1\"")
+            buildConfigField("String", "WS_BASE_URL", "\"${prodApiOrigin.replace("https://", "wss://").replace("http://", "ws://")}\"")
+            buildConfigField("String", "WEB_BASE_URL", "\"$prodWebOrigin\"")
         }
     }
     buildFeatures {

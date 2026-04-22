@@ -8,6 +8,8 @@ import { motion, AnimatePresence } from "framer-motion";
 type EditableRiderProfile = { display_name: string; mobile_number: string; calling_number: string; emergency_number: string; city: string; bio: string; avatar_data: string; language: string; avatar_scale: number; avatar_x: number; avatar_y: number; };
 
 const RIDER_PROFILE_STORAGE_KEY = "bmg_rider_profile_edit";
+const autoReservePrice6h = (price12h: number) => Math.max(1, price12h - Math.max(200, Math.min(500, Math.round(price12h * 0.14))));
+const autoReservePrice24h = (price12h: number) => price12h + Math.max(300, Math.min(700, Math.round(price12h * 0.22)));
 
 const AccordionItem = ({ icon: Icon, title, children, isOpen, onClick }: { icon: any, title: string, children: React.ReactNode, isOpen: boolean, onClick: () => void }) => {
   return (
@@ -64,7 +66,7 @@ const RiderProfilePage = () => {
   });
 
   const [form, setForm] = useState({ vehicle_type: "car", brand_model: "", registration_number: "", color: "White", seater_count: 5, vehicle_condition: "good", area: "", rc_number: "", insurance_number: "", notes: "" });
-  const [reserveForm, setReserveForm] = useState({ route_from: "", route_to: "", vehicle_type: "car", price_12h: 0, price_24h: 0 });
+  const [reserveForm, setReserveForm] = useState({ route_from: "", route_to: "", vehicle_type: "car", price_6h: 0, price_12h: 2500, price_24h: 0 });
 
   const token = authStore.getToken();
 
@@ -148,13 +150,16 @@ const RiderProfilePage = () => {
 
   const onSaveReservePrice = async (e: FormEvent) => {
     e.preventDefault(); if (!token) return;
-    if (!reserveForm.route_from.trim() || !reserveForm.route_to.trim() || reserveForm.price_12h <= 0 || reserveForm.price_24h <= 0) {
+    if (!reserveForm.route_from.trim() || !reserveForm.route_to.trim() || reserveForm.price_12h <= 0) {
       setNotice("Please fill valid route and prices."); return;
     }
     setLoading(true);
     try {
-      await backendApi.createMyReserveRoutePrice({ ...reserveForm, price_12h: Number(reserveForm.price_12h), price_24h: Number(reserveForm.price_24h) }, token);
-      setReserveForm({ route_from: "", route_to: "", vehicle_type: "car", price_12h: 0, price_24h: 0 });
+      const price12 = Number(reserveForm.price_12h);
+      const final6h = reserveForm.price_6h > 0 ? Number(reserveForm.price_6h) : autoReservePrice6h(price12);
+      const final24h = reserveForm.price_24h > 0 ? Number(reserveForm.price_24h) : autoReservePrice24h(price12);
+      await backendApi.createMyReserveRoutePrice({ ...reserveForm, price_6h: final6h, price_12h: price12, price_24h: final24h }, token);
+      setReserveForm({ route_from: "", route_to: "", vehicle_type: "car", price_6h: 0, price_12h: 2500, price_24h: 0 });
       setNotice("Reserve pricing saved."); setShowReserveForm(false); await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to save"); } finally { setLoading(false); setTimeout(() => setNotice(''), 3000); }
   };
@@ -329,14 +334,19 @@ const RiderProfilePage = () => {
                           </div>
                           <div className="grid grid-cols-2 gap-3">
                              <div className="relative">
+                               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">6h</span>
+                               <input type="number" className="w-full h-12 bg-gray-50 rounded-xl pl-12 pr-4 text-sm font-bold outline-none" placeholder="₹ Auto" value={reserveForm.price_6h || ""} onChange={(e) => setReserveForm((p) => ({ ...p, price_6h: Number(e.target.value || 0) }))} />
+                             </div>
+                             <div className="relative">
                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">12h</span>
-                               <input type="number" className="w-full h-12 bg-gray-50 rounded-xl pl-12 pr-4 text-sm font-bold outline-none" placeholder="₹ Price" value={reserveForm.price_12h || ""} onChange={(e) => setReserveForm((p) => ({ ...p, price_12h: Number(e.target.value || 0) }))} />
+                               <input type="number" className="w-full h-12 bg-gray-50 rounded-xl pl-12 pr-4 text-sm font-bold outline-none" placeholder="₹ Base (e.g. 2500)" value={reserveForm.price_12h || ""} onChange={(e) => setReserveForm((p) => ({ ...p, price_12h: Number(e.target.value || 0) }))} />
                              </div>
                              <div className="relative">
                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">24h</span>
-                               <input type="number" className="w-full h-12 bg-gray-50 rounded-xl pl-12 pr-4 text-sm font-bold outline-none" placeholder="₹ Price" value={reserveForm.price_24h || ""} onChange={(e) => setReserveForm((p) => ({ ...p, price_24h: Number(e.target.value || 0) }))} />
+                               <input type="number" className="w-full h-12 bg-gray-50 rounded-xl pl-12 pr-4 text-sm font-bold outline-none" placeholder="₹ Auto" value={reserveForm.price_24h || ""} onChange={(e) => setReserveForm((p) => ({ ...p, price_24h: Number(e.target.value || 0) }))} />
                              </div>
                           </div>
+                          <p className="text-[11px] text-gray-500 font-medium">Tip: 12h fare mandatory hai. 6h/24h blank rakhoge to system smart market band se auto-calculate karega.</p>
                         </div>
                         <button disabled={loading} className="mt-4 w-full h-12 rounded-xl bg-gray-900 text-sm font-bold text-white shadow-float disabled:opacity-50">
                           {loading ? "Saving..." : "Add Route Price"}
@@ -356,6 +366,10 @@ const RiderProfilePage = () => {
                             <span>{rp.route_to}</span>
                          </div>
                          <div className="flex gap-4">
+                            <div>
+                               <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">6 Hours</p>
+                               <p className="text-sm font-bold">₹{new Intl.NumberFormat("en-IN").format(rp.price_6h)}</p>
+                            </div>
                             <div>
                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">12 Hours</p>
                                <p className="text-sm font-bold">₹{new Intl.NumberFormat("en-IN").format(rp.price_12h)}</p>

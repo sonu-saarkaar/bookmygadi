@@ -9,6 +9,17 @@ export const adminTokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY) || localStorage.getItem("bmg_token"),
   set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
   clear: () => localStorage.removeItem(TOKEN_KEY),
+  getExpMs: () => {
+    const token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("bmg_token");
+    if (!token) return null;
+    try {
+      const part = token.split(".")[1];
+      const payload = JSON.parse(atob(part));
+      return payload?.exp ? Number(payload.exp) * 1000 : null;
+    } catch {
+      return null;
+    }
+  },
 };
 
 async function requestV1<T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> {
@@ -97,8 +108,18 @@ export const adminV2Api = {
     if (me?.role !== "admin") {
       throw new Error("Only admin users can access admin console");
     }
-    return { access_token: token.access_token, role: "super_admin", name: me.name || "Admin" };
+    return { access_token: token.access_token, role: "admin", name: me.name || "Admin" };
   },
+  adminForgotPasswordStart: (email: string) =>
+    requestV1<{ message: string }>("/auth/admin/forgot-password/start", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }, false),
+  adminForgotPasswordVerify: (email: string, otp: string, new_password: string) =>
+    requestV1<{ message: string }>("/auth/admin/forgot-password/verify", {
+      method: "POST",
+      body: JSON.stringify({ email, otp, new_password }),
+    }, false),
 
   getKpis: async () => {
     const d = await requestV1<any>("/admin/dashboard");
@@ -124,7 +145,7 @@ export const adminV2Api = {
 
   listRiders: (q = "") => requestV1<any[]>(`/admin/riders${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   getRider: (id: string) => requestV1<any>(`/admin/riders?q=${encodeURIComponent(id)}`),
-  blockRider: (id: string) => requestV1<any>(`/admin/riders/${id}/block`, { method: "PATCH", body: JSON.stringify({ status: "blocked" }) }),
+  blockRider: (id: string, reason?: string) => requestV1<any>(`/admin/riders/${id}/block`, { method: "PATCH", body: JSON.stringify({ reason }) }),
   unblockRider: (id: string) => requestV1<any>(`/admin/riders/${id}/unblock`, { method: "PATCH", body: JSON.stringify({ status: "active" }) }),
 
   listDrivers: () => requestV1<any[]>("/admin/drivers"),
@@ -254,5 +275,23 @@ export const adminV2Api = {
   crmRefileDriver: (id: string, note = "") => requestV1<any>(`/crm/drivers/${id}/refile`, { method: "POST", body: JSON.stringify({ note }) }),
   crmBlockDriver: (id: string, reason: string) => requestV1<any>(`/crm/drivers/${id}/block`, { method: "POST", body: JSON.stringify({ reason }) }),
   crmDashboard: () => requestV1<any>("/crm/dashboard-analytics"),
+  listEnterpriseTeamMembers: () => requestV1<any[]>("/admin/enterprise/team-members"),
+  createEnterpriseTeamMember: (payload: any) => requestV1<any>("/admin/enterprise/team-members", { method: "POST", body: JSON.stringify(payload) }),
+  updateEnterpriseTeamMember: (memberId: string, payload: any) =>
+    requestV1<any>(`/admin/enterprise/team-members/${memberId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  listFounderProfiles: () => requestV1<any[]>("/admin/enterprise/company/founders"),
+  upsertFounderProfile: (payload: any) => requestV1<any>("/admin/enterprise/company/founders", { method: "POST", body: JSON.stringify(payload) }),
+  getPolicy: (policyType: "terms" | "privacy" | "refund") => requestV1<any>(`/admin/enterprise/policies/${policyType}`),
+  savePolicy: (policyType: "terms" | "privacy" | "refund", payload: any) =>
+    requestV1<any>(`/admin/enterprise/policies/${policyType}`, { method: "PUT", body: JSON.stringify(payload) }),
+  listSearchMonitor: (status?: string) =>
+    requestV1<any[]>(`/admin/enterprise/search-monitor${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  assignSearchDriver: (eventId: string, driver_id: string) =>
+    requestV1<any>(`/admin/enterprise/search-monitor/${eventId}/assign-driver`, { method: "PATCH", body: JSON.stringify({ driver_id }) }),
+  acceptSearch: (eventId: string) =>
+    requestV1<any>(`/admin/enterprise/search-monitor/${eventId}/accept`, { method: "PATCH" }),
+  getDispatchControl: () => requestV1<any>("/admin/enterprise/dispatch-control"),
+  updateDispatchControl: (mode: "auto" | "manual" | "hybrid", notes?: string) =>
+    requestV1<any>("/admin/enterprise/dispatch-control", { method: "PUT", body: JSON.stringify({ mode, notes }) }),
   requestV1: <T>(path: string, init?: RequestInit) => requestV1<T>(path, init),
 };

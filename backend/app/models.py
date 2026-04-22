@@ -39,6 +39,7 @@ class User(Base, TimestampMixin):
     total_spending: Mapped[float] = mapped_column(Float, default=0.0)
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
     referral_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
 
     vehicle_registrations: Mapped[list["RiderVehicleRegistration"]] = relationship(
         "RiderVehicleRegistration",
@@ -295,8 +296,9 @@ class ReserveRoutePrice(Base, TimestampMixin):
     route_from: Mapped[str] = mapped_column(String(120), index=True)
     route_to: Mapped[str] = mapped_column(String(120), index=True)
     vehicle_type: Mapped[str] = mapped_column(String(40), default="car", index=True)
+    price_6h: Mapped[int | None] = mapped_column(Integer, nullable=True)   # auto-calc if None
     price_12h: Mapped[int] = mapped_column(Integer)
-    price_24h: Mapped[int] = mapped_column(Integer)
+    price_24h: Mapped[int | None] = mapped_column(Integer, nullable=True)  # auto-calc if None
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -480,3 +482,78 @@ class UserReferral(Base, TimestampMixin):
     invitee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
     reward_amount: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(40), default="pending") # pending, rewarded
+
+
+class AuthOtp(Base, TimestampMixin):
+    __tablename__ = "auth_otps"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), index=True, default="admin_reset")
+    otp_code: Mapped[str] = mapped_column(String(10))
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AdminTeamMember(Base, TimestampMixin):
+    __tablename__ = "admin_team_members"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(40), default="operations")
+    permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_level: Mapped[str] = mapped_column(String(30), default="standard")
+    ownership_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CompanyFounderProfile(Base, TimestampMixin):
+    __tablename__ = "company_founder_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    member_id: Mapped[str | None] = mapped_column(ForeignKey("admin_team_members.id"), nullable=True)
+    founder_type: Mapped[str] = mapped_column(String(20), default="founder")  # founder/co_founder
+    full_name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    identity_document: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company_documents: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_admin_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PolicyDocument(Base, TimestampMixin):
+    __tablename__ = "policy_documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    policy_type: Mapped[str] = mapped_column(String(40), unique=True, index=True)  # terms/privacy/refund
+    title: Mapped[str] = mapped_column(String(150))
+    content: Mapped[str] = mapped_column(Text, default="")
+    last_updated_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class RideSearchEvent(Base, TimestampMixin):
+    __tablename__ = "ride_search_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    pickup_location: Mapped[str] = mapped_column(String(255))
+    drop_location: Mapped[str] = mapped_column(String(255))
+    search_mode: Mapped[str] = mapped_column(String(20), default="instant")  # instant/reserve
+    vehicle_type: Mapped[str] = mapped_column(String(40), default="car")
+    status: Mapped[str] = mapped_column(String(30), default="searching")  # searching/assigned/accepted
+    search_started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    assigned_driver_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    ride_id: Mapped[str | None] = mapped_column(ForeignKey("rides.id"), nullable=True)
+    searched_seconds: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DispatchControl(Base, TimestampMixin):
+    __tablename__ = "dispatch_controls"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    mode: Mapped[str] = mapped_column(String(20), default="auto")  # auto/manual/hybrid
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(120), nullable=True)

@@ -8,25 +8,30 @@ plugins {
 android {
     namespace = "com.bookmygadi.core.network"
     compileSdk = 34
+
+    val props = com.android.build.gradle.internal.cxx.configure.gradleLocalProperties(rootDir, providers)
+    val serverIp = props.getProperty("SERVER_IP", "10.0.2.2")
+    val backendPort = props.getProperty("BACKEND_PORT", "8000")
+    val devApiOrigin = props.getProperty("DEV_API_ORIGIN", "http://$serverIp:$backendPort")
+    val devWsOrigin = props.getProperty("DEV_WS_ORIGIN", "ws://$serverIp:$backendPort")
+    val prodApiOrigin = props.getProperty("PROD_API_ORIGIN", "https://api.bookmygadi.app")
+    val prodWsOrigin = prodApiOrigin.replace("https://", "wss://").replace("http://", "ws://")
+
     defaultConfig {
         minSdk = 24
-
-        val props         = com.android.build.gradle.internal.cxx.configure.gradleLocalProperties(rootDir, providers)
-        val serverIp      = props.getProperty("SERVER_IP",      "10.0.2.2")
-        
-        buildConfigField("String", "SERVER_IP",    "\"$serverIp\"")
+        buildConfigField("String", "SERVER_IP", "\"$serverIp\"")
     }
     
     buildTypes {
         getByName("debug") {
-            buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8000\"")
-            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000/api/v1/\"")
-            buildConfigField("String", "WS_BASE_URL", "\"ws://10.0.2.2:8000\"")
+            buildConfigField("String", "BASE_URL", "\"$devApiOrigin\"")
+            buildConfigField("String", "API_BASE_URL", "\"$devApiOrigin/api/v1/\"")
+            buildConfigField("String", "WS_BASE_URL", "\"$devWsOrigin\"")
         }
         getByName("release") {
-            buildConfigField("String", "BASE_URL", "\"https://api.bookmygadi.app\"")
-            buildConfigField("String", "API_BASE_URL", "\"https://api.bookmygadi.app/api/v1/\"")
-            buildConfigField("String", "WS_BASE_URL", "\"wss://api.bookmygadi.app\"")
+            buildConfigField("String", "BASE_URL", "\"$prodApiOrigin\"")
+            buildConfigField("String", "API_BASE_URL", "\"$prodApiOrigin/api/v1/\"")
+            buildConfigField("String", "WS_BASE_URL", "\"$prodWsOrigin\"")
         }
     }
     buildFeatures {

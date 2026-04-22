@@ -30,6 +30,7 @@ const formatDateTime = (date = new Date()) => {
 
 type BookingState = "form" | "pricing" | "searching" | "reserve_summary";
 type UrgencyType = "quick_book" | "ride" | "emergency" | "reserve";
+type ReserveSource = "driver_defined" | "recent_trip_data" | "admin_default";
 const ACTIVE_BOOKING_STORAGE_KEY = "bmg_active_booking";
 const ACTIVE_BOOKING_TOKEN_STORAGE_KEY = "bmg_active_booking_customer_token";
 const LAST_KNOWN_COORDS_KEY = "bmg_last_known_coords";
@@ -346,6 +347,9 @@ const HomePage = () => {
   const [minFare, setMinFare] = useState(() => initialNegotiationContext?.minFare ?? 2000);
   const [maxFare, setMaxFare] = useState(() => initialNegotiationContext?.maxFare ?? 3000);
   const [quoteDistance, setQuoteDistance] = useState<number | null>(() => initialNegotiationContext?.quoteDistance ?? null);
+  const reserveDurationHours = 12;
+  const [reservePriceSource, setReservePriceSource] = useState<ReserveSource>("admin_default");
+  const [reserveNearbyDrivers, setReserveNearbyDrivers] = useState(0);
   const [loading, setLoading] = useState(false);
   const [negotiationPreparing, setNegotiationPreparing] = useState(false);
   const [message, setMessage] = useState("");
@@ -1082,6 +1086,58 @@ const handleDestinationSearch = async (query: string) => {
       payload.destination_lng = destinationCoords.lng;
     }
     
+    if (isReserveFlow) {
+      Promise.race([
+        backendApi.getReserveQuote(
+          {
+            pickup_area: pickup,
+            destination_area: destination,
+            duration_hours: 12,
+            radius_km: 10,
+            pickup_lat: pickupCoords?.lat,
+            pickup_lng: pickupCoords?.lng,
+            vehicle_type: mappedVehicleType,
+          },
+          token,
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("reserve_quote_timeout")), 9000)),
+      ])
+        .then((quote) => {
+          setReservePriceSource(quote.source);
+          setReserveNearbyDrivers(quote.nearby_driver_count || 0);
+          setMinFare(quote.min_price);
+          setMaxFare(quote.max_price);
+          setOfferPrice(quote.min_price);
+
+          const baseFare = quote.min_price || 2500;
+          const updatedVehicles = vehicleList.map((v) => ({
+            ...v,
+            estimatedPrice: Math.round(baseFare * (v.acMode === "ac" ? 1.2 : 1) * (v.seater >= 7 ? 1.25 : 1)),
+          }));
+          setVehicleList(updatedVehicles);
+          setQuoteDistance(selectedDistance || null);
+          setBookingState("reserve_summary");
+        })
+        .catch(() => {
+          // Reserve fallback stays aligned to the fixed 12h base pricing.
+          const fallbackBase = 2500;
+          const updatedVehicles = vehicleList.map((v) => ({
+            ...v,
+            estimatedPrice: Math.round(fallbackBase * (v.acMode === "ac" ? 1.2 : 1) * (v.seater >= 7 ? 1.25 : 1)),
+          }));
+          setVehicleList(updatedVehicles);
+          setReservePriceSource("admin_default");
+          setReserveNearbyDrivers(0);
+          setMinFare(fallbackBase - 200);
+          setMaxFare(fallbackBase + 500);
+          setOfferPrice(fallbackBase);
+          setQuoteDistance(selectedDistance || 6);
+          setBookingState("reserve_summary");
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
+
     Promise.race([
       backendApi.getPriceQuote(payload, token),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('quote_timeout')), 8000)),
@@ -1089,59 +1145,34 @@ const handleDestinationSearch = async (query: string) => {
       .then((quote) => {
         setMinFare(quote.min_fare); setMaxFare(quote.max_fare);
         setQuoteDistance(quote.estimated_distance_km); setOfferPrice(quote.suggested_fare || quote.min_fare);
-
-        if (isReserveFlow) {
-          const baseFare = quote.suggested_fare || quote.min_fare || 200;
-          const updatedVehicles = vehicleList.map(v => ({
-            ...v,
-            estimatedPrice: Math.round(baseFare * (v.acMode === 'ac' ? 1.3 : 1) * (v.seater >= 7 ? 1.5 : 1))
-          }));
-          setVehicleList(updatedVehicles);
-          setQuoteDistance(quote.estimated_distance_km || selectedDistance || null);
-          setBookingState("reserve_summary");
-          // navigate(RESERVATION_PRICE_NEGOTION_PATH, { replace: true });
-        } else {
-          writeNegotiationContext({
-            pickup,
-            destination,
-            pickupCoords,
-            destinationCoords,
-            minFare: quote.min_fare,
-            maxFare: quote.max_fare,
-            offerPrice: quote.suggested_fare,
-            quoteDistance: quote.estimated_distance_km,
-          });
-          setBookingState("pricing");
-          navigate("/app/price_negotiation", { replace: true });
-        }
+        writeNegotiationContext({
+          pickup,
+          destination,
+          pickupCoords,
+          destinationCoords,
+          minFare: quote.min_fare,
+          maxFare: quote.max_fare,
+          offerPrice: quote.suggested_fare,
+          quoteDistance: quote.estimated_distance_km,
+        });
+        setBookingState("pricing");
+        navigate("/app/price_negotiation", { replace: true });
       })
       .catch(() => {
-        if (isReserveFlow) {
-          const fallbackBase = 500; // rough estimation fallback
-          const updatedVehicles = vehicleList.map(v => ({
-            ...v,
-            estimatedPrice: Math.round(fallbackBase * (v.acMode === 'ac' ? 1.3 : 1) * (v.seater >= 7 ? 1.5 : 1))
-          }));
-          setVehicleList([...updatedVehicles]);
-          setQuoteDistance(selectedDistance || 6); // Keep calculated distance instead of overriding
-          setBookingState("reserve_summary");
-          // navigate(RESERVATION_PRICE_NEGOTION_PATH, { replace: true });
-        } else {
-          // Fallback fares if calculation fails
-          setMinFare(150); setMaxFare(350); setOfferPrice(250);
-          writeNegotiationContext({
-            pickup,
-            destination,
-            pickupCoords,
-            destinationCoords,
-            minFare: 150,
-            maxFare: 350,
-            offerPrice: 250,
-            quoteDistance: null,
-          });
-          setBookingState("pricing");
-          navigate("/app/price_negotiation", { replace: true });
-        }
+        // Fallback fares if calculation fails
+        setMinFare(150); setMaxFare(350); setOfferPrice(250);
+        writeNegotiationContext({
+          pickup,
+          destination,
+          pickupCoords,
+          destinationCoords,
+          minFare: 150,
+          maxFare: 350,
+          offerPrice: 250,
+          quoteDistance: null,
+        });
+        setBookingState("pricing");
+        navigate("/app/price_negotiation", { replace: true });
       })
       .finally(() => setLoading(false));
   };
@@ -1201,6 +1232,11 @@ const handleDestinationSearch = async (query: string) => {
                ? `${selectedModel} (${selectedModel === 'Swift' ? packageType : selectedModel === 'Wedding Special' ? eventType : goodsType})` 
                : selectedModel,
             urgency_type: urgencyType, pickup_area: pickup,
+            reserve_duration_hours: serviceMode === 'reserved' ? reserveDurationHours : undefined,
+            reserve_radius_km: serviceMode === 'reserved' ? 10 : undefined,
+            reserve_quote_low: serviceMode === 'reserved' ? minFare : undefined,
+            reserve_quote_high: serviceMode === 'reserved' ? maxFare : undefined,
+            reserve_price_source: serviceMode === 'reserved' ? reservePriceSource : undefined,
             booking_mode: bookingPriority,
             vehicle_count: vehicleMode === 'multiple' ? vehicleList.length : 1,
             market_rate: Math.round((serviceMode === 'reserved' ? totalReservePrice : offerPrice) * 1.05)
@@ -1743,7 +1779,8 @@ const handleDestinationSearch = async (query: string) => {
                    </div>
                  </motion.div>
                )}
-            </div>
+
+             </div>
 
             {/* CONDITIONAL RESERVATION DETAILS — Occasion & Logistics only (General has no extra box) */}
             {serviceMode === 'reserved' && selectedModel !== 'Swift' && (
@@ -2000,6 +2037,14 @@ const handleDestinationSearch = async (query: string) => {
                       <p className="text-xs font-bold text-indigo-700">~{selectedDistance.toFixed(1)} km Total Distance</p>
                     </div>
                   )}
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-indigo-100/50 mt-1">
+                    <span className="px-2 py-1 rounded-lg bg-white text-[10px] font-black text-gray-700 border border-gray-200">
+                      Source: {reservePriceSource.replaceAll("_", " ")}
+                    </span>
+                    <span className="px-2 py-1 rounded-lg bg-white text-[10px] font-black text-gray-700 border border-gray-200">
+                      Drivers: {reserveNearbyDrivers}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

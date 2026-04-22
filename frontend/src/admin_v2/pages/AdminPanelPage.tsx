@@ -10,6 +10,11 @@ import { RiderManagementBoard } from "@/admin_v2/components/RiderManagementBoard
 import { UserManagementBoard } from "@/admin_v2/components/UserManagementBoard";
 import { LiveRidesBoard } from "@/admin_v2/components/LiveRidesBoard";
 import { ServiceManagementBoard } from "@/admin_v2/components/ServiceManagementBoard";
+import { PriceManagementBoard } from "@/admin_v2/components/PriceManagementBoard";
+import { TeamManagementBoard } from "@/admin_v2/components/TeamManagementBoard";
+import { CompanyStructureBoard } from "@/admin_v2/components/CompanyStructureBoard";
+import { PolicyManagementBoard } from "@/admin_v2/components/PolicyManagementBoard";
+import { LiveSearchMonitorBoard } from "@/admin_v2/components/LiveSearchMonitorBoard";
 import { SupportDeskBoard } from "@/admin_v2/components/SupportDeskBoard";
 
 const toneForStatus = (status?: string) => {
@@ -41,22 +46,19 @@ export const AdminV2PanelPage = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<RiderRegistrationItem[]>([]);
-  const [registrationStatus, setRegistrationStatus] = useState("all");
+  const [registrationStatus, setRegistrationStatus] = useState("pending");
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string>("");
   const [registrationDraft, setRegistrationDraft] = useState<Partial<RiderRegistrationItem> | null>(null);
   const [registrationRemark, setRegistrationRemark] = useState("");
 
-  const loadRegistrations = async () => {
+  const loadRegistrations = async (resetSelection = false) => {
     try {
       const rows = await adminV2Api.listRiderRegistrations(registrationStatus === "all" ? undefined : registrationStatus);
       setRegistrations(rows);
-      if (rows.length > 0 && !selectedRegistrationId) {
+      if (rows.length > 0 && (resetSelection || !selectedRegistrationId)) {
         setSelectedRegistrationId(rows[0].id);
         setRegistrationDraft(rows[0]);
         setRegistrationRemark(rows[0].admin_note || "");
-      }
-      if (!rows.length) {
-        pushToast("No rider registration records found for selected filter.", "info");
       }
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Unable to load rider registrations", "danger");
@@ -212,7 +214,7 @@ export const AdminV2PanelPage = () => {
   useEffect(() => { refreshAll(); }, [query]);
   useEffect(() => {
     if (module === "registrations") {
-      loadRegistrations();
+      loadRegistrations(true);
     }
   }, [module, registrationStatus]);
 
@@ -320,7 +322,12 @@ export const AdminV2PanelPage = () => {
     if (module === "users-mgmt") return <UserManagementBoard />;
     if (module === "rider-mgmt") return <RiderManagementBoard />;
     if (module === "rides") return <LiveRidesBoard />;
+    if (module === "live-search") return <LiveSearchMonitorBoard />;
     if (module === "services") return <ServiceManagementBoard />;
+    if (module === "price-mgmt") return <PriceManagementBoard />;
+    if (module === "team-mgmt") return <TeamManagementBoard />;
+    if (module === "company-structure") return <CompanyStructureBoard />;
+    if (module === "policies") return <PolicyManagementBoard />;
     if (module === "support") return <SupportDeskBoard />;
 
     if (module === "registrations") return (

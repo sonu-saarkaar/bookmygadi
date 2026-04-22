@@ -1,6 +1,6 @@
 ﻿import { create } from "zustand";
 
-type AdminRole = "super_admin" | "ops_admin" | "support_agent" | "finance_manager";
+type AdminRole = "admin";
 
 type Toast = { id: string; message: string; kind: "success" | "info" | "warning" | "danger" };
 
