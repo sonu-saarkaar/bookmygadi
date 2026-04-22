@@ -1450,6 +1450,19 @@ const handleDestinationSearch = async (query: string) => {
   const isInstantHomeLayout = serviceMode === 'Instant Ride' && vehicleType !== "BOLERO";
   const rectangularCardClass = "rounded-[24px] border border-slate-100 bg-white px-[14px] py-[12px] shadow-[0_10px_24px_rgba(15,23,42,0.045)]";
   const rectangularActionButtonClass = "flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_3px_10px_rgba(15,23,42,0.065)] transition-transform active:scale-95";
+  const topTextureTheme = serviceMode === "Instant Ride"
+    ? {
+        gradient: "bg-gradient-to-b from-emerald-100/95 via-emerald-50/70 to-transparent",
+        orbStrong: "bg-emerald-300/45",
+        orbSoft: "bg-emerald-200/45",
+        pattern: "bg-[linear-gradient(120deg,rgba(16,185,129,0.14)_0%,rgba(16,185,129,0.04)_35%,transparent_70%)]",
+      }
+    : {
+        gradient: "bg-gradient-to-b from-blue-100/95 via-blue-50/70 to-transparent",
+        orbStrong: "bg-blue-300/40",
+        orbSoft: "bg-indigo-200/45",
+        pattern: "bg-[linear-gradient(120deg,rgba(59,130,246,0.14)_0%,rgba(99,102,241,0.06)_40%,transparent_72%)]",
+      };
   const pickupAccuracyLabel = isRefreshingPickupLocation || pickup === "Fetching Live Location..."
     ? "Refreshing your live location"
     : "Tap to refresh accurate live location";
@@ -1530,7 +1543,13 @@ const handleDestinationSearch = async (query: string) => {
 
   return (
     <div className="relative isolate w-full min-h-screen overflow-x-hidden bg-[#fdfefe] transition-colors duration-700">
-      <div className={`relative z-10 w-full ${isInstantHomeLayout ? "px-3 pt-2" : "px-3 pt-3"}`}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[190px] overflow-hidden">
+        <div className={`absolute inset-0 ${topTextureTheme.gradient}`} />
+        <div className={`absolute -right-14 -top-20 h-56 w-56 rounded-full blur-3xl ${topTextureTheme.orbStrong}`} />
+        <div className={`absolute -left-12 -top-12 h-44 w-44 rounded-full blur-2xl ${topTextureTheme.orbSoft}`} />
+        <div className={`absolute inset-0 opacity-80 ${topTextureTheme.pattern}`} />
+      </div>
+      <div className={`relative z-10 w-full ${isInstantHomeLayout ? "px-3 pt-6" : "px-3 pt-3"}`}>
       <AnimatePresence mode="wait">
         {message && (
           <motion.div 
@@ -1678,7 +1697,7 @@ const handleDestinationSearch = async (query: string) => {
                  ))}
                </div>
             ) : (
-               <div className={`${isInstantHomeLayout ? "min-h-[64px] rounded-none border-0 bg-transparent p-0 shadow-none" : "bg-white/60 p-1.5 rounded-[20px] shadow-[0_8px_32px_rgba(0,0,0,0.05)] border border-white/80"} flex items-center gap-1.5`}>
+               <div className={`${isInstantHomeLayout ? "min-h-[64px] rounded-[20px] border border-slate-100 bg-white p-1.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]" : "bg-white/60 p-1.5 rounded-[20px] shadow-[0_8px_32px_rgba(0,0,0,0.05)] border border-white/80"} flex items-center gap-1.5`}>
                   <motion.button 
                     whileTap={{ scale: 0.96 }}
                     onClick={() => setJourneyType('oneway')}
