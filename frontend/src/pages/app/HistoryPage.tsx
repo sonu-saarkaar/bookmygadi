@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { authStore, backendApi, type Ride } from "@/services/backendApi";
 import { History, ChevronRight, CheckCircle2, XCircle, MapPin, SearchX, IndianRupee } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { formatBookingDateTime } from "@/utils/datetime";
 
 const ACTIVE_RIDE_STATUSES = new Set([
   "pending",
@@ -15,7 +16,21 @@ const ACTIVE_RIDE_STATUSES = new Set([
   "in_progress",
 ]);
 
+const formatRideStatusLabel = (status?: string | null) => {
+  const value = String(status || "").toLowerCase();
+  if (value === "pending") return "Pending";
+  if (value === "searching") return "Searching";
+  if (value === "assigned" || value === "accepted") return "Accepted";
+  if (value === "driver_arrived" || value === "arriving") return "On The Way";
+  if (value === "started" || value === "in_progress") return "Ride Started";
+  if (value === "completed") return "Completed";
+  if (value === "cancelled" || value === "canceled") return "Cancelled";
+  if (value === "rejected") return "Rejected";
+  return "Ride";
+};
+
 const formatRideDate = (value?: string | null) => {
+  return formatBookingDateTime(value);
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
@@ -140,9 +155,9 @@ const HistoryPage = () => {
                   } else if (ride.status === 'rejected') {
                       navigate("/app/booking-rejected");
                   } else if (ACTIVE_RIDE_STATUSES.has((ride.status || "").toLowerCase())) {
-                      navigate("/app/booking-confirmed", { state: payload });
+                      navigate(`/app/booking-confirmed/${ride.booking_display_id || ride.id}`, { state: payload });
                   } else {
-                      navigate("/app/booking-confirmed", { state: payload });
+                      navigate(`/app/booking-confirmed/${ride.booking_display_id || ride.id}`, { state: payload });
                   }
                 }}
               >
@@ -151,15 +166,10 @@ const HistoryPage = () => {
                       <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
                           {formatRideDate(ride.created_at || ride.accepted_at || ride.updated_at)}
                       </p>
-                      <p className="text-sm font-bold text-gray-500 mt-1">ID: BMG-{ride.id.slice(-6).toUpperCase()}</p>
+                      <p className="text-sm font-bold text-gray-500 mt-1">ID: {ride.booking_display_id || ride.id}</p>
                     </div>
-                    <div className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tighter border ${
-                        ride.status === 'completed' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                        ride.status === 'cancelled' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                        ride.status === 'rejected' ? 'bg-amber-50 text-amber-600 border-amber-100' :
-                        'bg-blue-50 text-blue-600 border-blue-100'
-                    }`}>
-                        {ride.status}
+                    <div className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tighter border bg-blue-50 text-blue-600 border-blue-100">
+                        {formatRideStatusLabel(ride.status)}
                     </div>
                 </div>
 

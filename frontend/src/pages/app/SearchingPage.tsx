@@ -87,7 +87,7 @@ const SearchingPage = () => {
           sessionStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);
           localStorage.removeItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY);
           sessionStorage.removeItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY);
-          navigate("/app/booking-confirmed", { replace: true, state: { ...safePayload, status: ride.status, agreedFare: ride.agreed_fare ?? safePayload.offerPrice, isReserved: ride.preference?.urgency_type === 'reserve' } }); return;
+          navigate(`/app/booking-confirmed/${ride.booking_display_id || ride.id}`, { replace: true, state: { ...safePayload, status: ride.status, agreedFare: ride.agreed_fare ?? safePayload.offerPrice, isReserved: ride.preference?.urgency_type === 'reserve' } }); return;
         }
         if (rejectedStatuses.has(status)) {
           localStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);

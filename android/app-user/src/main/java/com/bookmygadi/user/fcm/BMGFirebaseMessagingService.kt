@@ -6,10 +6,23 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.bookmygadi.core.domain.AuthRepository
+import com.bookmygadi.core.network.BookMyGadiApi
+import com.bookmygadi.core.network.FcmTokenRequest
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.bookmygadi.user.MainActivity
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * BookMyGaadi FCM Messaging Service (User / Passenger App)
@@ -36,10 +49,15 @@ import com.bookmygadi.user.MainActivity
  *   "screen": "tracking" | "feedback" | "home"
  * }
  */
+@AndroidEntryPoint
 class BMGFirebaseMessagingService : FirebaseMessagingService() {
+    @Inject lateinit var api: BookMyGadiApi
+    @Inject lateinit var authRepository: AuthRepository
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
-        private const val CHANNEL_ID   = "bmg_ride_updates"
+        private const val CHANNEL_ID   = "USER_RIDE_STATUS"
         private const val CHANNEL_NAME = "Ride Updates"
     }
 
@@ -48,11 +66,10 @@ class BMGFirebaseMessagingService : FirebaseMessagingService() {
     // ------------------------------------------------------------------
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // TODO: POST token to /api/v1/auth/fcm-token when backend endpoint is ready
-        //   val prefs = getSharedPreferences("bmg_prefs", Context.MODE_PRIVATE)
-        //   prefs.edit().putString("fcm_token", token).apply()
-        //   lifecycleScope.launch { api.registerFcmToken(token, jwtToken) }
-        android.util.Log.d("FCM", "New token: $token")
+        serviceScope.launch {
+            val authToken = authRepository.getToken() ?: return@launch
+            runCatching { api.updateFcmToken(authToken, FcmTokenRequest(token)) }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -111,8 +128,14 @@ class BMGFirebaseMessagingService : FirebaseMessagingService() {
             .setVibrate(longArrayOf(0, 250, 100, 250))
             .build()
 
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(eventId, notification)
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        NotificationManagerCompat.from(this).notify(eventId, notification)
     }
 
     private fun ensureChannel() {
@@ -128,6 +151,11 @@ class BMGFirebaseMessagingService : FirebaseMessagingService() {
             getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(channel)
         }
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     // ------------------------------------------------------------------

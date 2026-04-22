@@ -13,6 +13,12 @@ interface BookMyGadiApi {
     @GET("auth/me")
     suspend fun getProfile(@Header("Authorization") token: String): ProfileResponse
 
+    @POST("auth/fcm-token")
+    suspend fun updateFcmToken(
+        @Header("Authorization") token: String,
+        @Body request: FcmTokenRequest
+    ): GenericMessageResponse
+
     @GET("rides/active")
     suspend fun getActiveRides(@Header("Authorization") token: String): List<RideDto>
 
@@ -45,6 +51,19 @@ interface BookMyGadiApi {
         @Header("Authorization") token: String,
         @Body request: LocationUpdateRequest
     )
+
+    @POST("rider/requests/{rideId}/accept")
+    suspend fun acceptRiderRequest(
+        @Path("rideId") rideId: String,
+        @Header("Authorization") token: String,
+        @Body request: RiderActionRequest
+    ): RiderRequestDto
+
+    @POST("rider/requests/{rideId}/reject")
+    suspend fun rejectRiderRequest(
+        @Path("rideId") rideId: String,
+        @Header("Authorization") token: String
+    ): RiderRequestDto
 
     // GET /api/v1/rider/active/{rideId}/tracking  — user fetches live coords
     @GET("rider/active/{rideId}/tracking")
@@ -112,6 +131,8 @@ data class PaymentStatusResponse(
 )
 
 data class LoginResponse(val access_token: String)
+data class FcmTokenRequest(val fcm_token: String)
+data class GenericMessageResponse(val message: String)
 data class ProfileResponse(val id: String, val email: String, val role: String, val name: String)
 data class RideDto(
     val id: String,
@@ -147,7 +168,21 @@ data class PriceQuoteResponse(
 
 data class LocationUpdateRequest(
     val lat: Double,
-    val lng: Double
+    val lng: Double,
+    val accuracy: Float? = null,
+    val heading: Float? = null,
+    val ts: String? = null,
+)
+
+data class RiderActionRequest(
+    val agreed_fare: Int? = null
+)
+
+data class RiderRequestDto(
+    val id: String,
+    val status: String,
+    val pickup_location: String,
+    val destination: String,
 )
 
 /**
@@ -161,8 +196,14 @@ data class RiderTrackingDto(
     val destination: String? = null,
     val driver_live_lat: Double? = null,
     val driver_live_lng: Double? = null,
+    val driver_live_accuracy: Double? = null,
+    val driver_live_heading: Double? = null,
+    val driver_live_updated_at: String? = null,
     val customer_live_lat: Double? = null,
     val customer_live_lng: Double? = null,
+    val customer_live_accuracy: Double? = null,
+    val customer_live_heading: Double? = null,
+    val customer_live_updated_at: String? = null,
     val pickup_lat: Double? = null,
     val pickup_lng: Double? = null,
     val destination_lat: Double? = null,

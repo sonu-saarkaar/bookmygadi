@@ -7,6 +7,46 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 
+DISTRICT_CODE_MAP = {
+    "vadodara": "05",
+}
+
+
+def _normalize_location_text(value: str | None) -> str:
+    return "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in (value or "")).strip()
+
+
+def _district_code_from_text(value: str | None) -> str:
+    normalized = _normalize_location_text(value)
+    for key, code in DISTRICT_CODE_MAP.items():
+        if key in normalized:
+            return code
+    if not normalized:
+        return "00"
+    checksum = sum(ord(ch) for ch in normalized if ch.isalnum()) % 100
+    return f"{checksum:02d}"
+
+
+def _vehicle_code(value: str | None) -> str:
+    normalized = _normalize_location_text(value)
+    if "bike" in normalized:
+        return "B"
+    if "auto" in normalized or "rikshaw" in normalized or "rickshaw" in normalized:
+        return "A"
+    if "pickup" in normalized or "bolero" in normalized or "logistics" in normalized:
+        return "P"
+    return "C"
+
+
+def _reserve_category_code(value: str | None) -> str:
+    normalized = _normalize_location_text(value)
+    if "event" in normalized or "wedding" in normalized or "occasion" in normalized:
+        return "E"
+    if "logistic" in normalized or "cargo" in normalized or "farming" in normalized:
+        return "L"
+    return "G"
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -70,8 +110,14 @@ class Ride(Base, TimestampMixin):
     payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
     driver_live_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     driver_live_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    driver_live_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    driver_live_heading: Mapped[float | None] = mapped_column(Float, nullable=True)
+    driver_live_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     customer_live_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     customer_live_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_live_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_live_heading: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_live_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -114,6 +160,25 @@ class Ride(Base, TimestampMixin):
             "condition": v.vehicle_condition or "Normal",
             "seater": v.seater_count or 4
         }
+
+    @property
+    def booking_display_id(self) -> str:
+        urgency = ((self.preference.urgency_type if self.preference else None) or "").lower()
+        vehicle_model = (self.preference.vehicle_model if self.preference else None) or ""
+        district_source = (
+            (self.preference.pickup_area if self.preference else None)
+            or self.pickup_location
+            or (self.customer.city if self.customer else None)
+        )
+        district_code = _district_code_from_text(district_source)
+        random_part = f"A{sum(ord(ch) for ch in self.id if ch.isalnum()) % 10000:04d}"
+
+        if urgency == "reserve":
+            middle = f"R{_reserve_category_code(vehicle_model)}"
+        else:
+            middle = f"I{_vehicle_code(self.vehicle_type or vehicle_model)}"
+
+        return f"BMG{middle}{district_code}{random_part}"
 
 
 class RidePreference(Base, TimestampMixin):

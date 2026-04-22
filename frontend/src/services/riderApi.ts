@@ -7,6 +7,7 @@ const EMBEDDED_RIDER_API_KEY = import.meta.env.VITE_RIDER_APP_API_KEY || "rider_
 
 export interface RiderRequest {
   id: string;
+  booking_display_id: string;
   pickup_location: string;
   destination: string;
   vehicle_type: string;
@@ -31,6 +32,7 @@ export interface RiderRequest {
 
 export interface RiderActiveRide {
   id: string;
+  booking_display_id: string;
   pickup_location: string;
   destination: string;
   vehicle_type: string;
@@ -45,6 +47,10 @@ export interface RiderActiveRide {
   arrived_at?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
+  preference?: {
+    urgency_type?: string;
+    booking_mode?: string;
+  } | null;
   created_at: string;
 }
 
@@ -86,7 +92,12 @@ async function riderRequest<T>(path: string, init: RequestInit = {}): Promise<T>
   const token = authStore.getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  } catch {
+    throw new Error("Unable to reach rider server. Please check internet or backend connection.");
+  }
   if (!response.ok) {
     let errorMessage = `Rider request failed (${response.status})`;
     try {

@@ -105,12 +105,22 @@ class WebSocketManager @Inject constructor() {
      * Called by the driver's ForegroundLocationService every 2-3 s.
      * Sends a raw JSON frame to all connected sockets (normally just one ride).
      */
-    fun sendLocation(rideId: String, lat: Double, lng: Double) {
+    fun sendLocation(
+        rideId: String,
+        lat: Double,
+        lng: Double,
+        accuracy: Float? = null,
+        heading: Float? = null,
+        ts: String? = null,
+    ) {
         val socket = sockets[rideId] ?: return
         val json = JSONObject().apply {
             put("type", WsEventType.DRIVER_LOCATION)
             put("lat", lat)
             put("lng", lng)
+            if (accuracy != null) put("accuracy", accuracy)
+            if (heading != null) put("heading", heading)
+            if (ts != null) put("ts", ts)
         }
         socket.send(json.toString())
     }

@@ -6,10 +6,55 @@ export interface GoogleAddressSuggestion {
   lon: number;
 }
 
+const uniqueNonEmpty = (parts: Array<string | undefined | null>): string[] => {
+  const seen = new Set<string>();
+  const rows: string[] = [];
+  for (const part of parts) {
+    const value = String(part || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(value);
+  }
+  return rows;
+};
+
 const GOOGLE_MAPS_API_KEY = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "").trim();
 
 const getComponent = (components: any[] | undefined, type: string): string | undefined =>
   components?.find((item) => Array.isArray(item?.types) && item.types.includes(type))?.short_name;
+
+const isRoadLikeLabel = (value?: string | null): boolean =>
+  /\b(road|rd|street|st|marg|lane|ln|nagar|chowk)\b/i.test(String(value || "").trim());
+
+const buildPreciseGoogleLabel = (result: any): string | null => {
+  const components = Array.isArray(result?.address_components) ? result.address_components : [];
+  const micro = uniqueNonEmpty([
+    getComponent(components, "premise"),
+    getComponent(components, "subpremise"),
+    getComponent(components, "point_of_interest"),
+    getComponent(components, "establishment"),
+    getComponent(components, "sublocality_level_3"),
+    getComponent(components, "sublocality_level_2"),
+    getComponent(components, "sublocality_level_1"),
+    getComponent(components, "neighborhood"),
+  ]);
+  const macro = uniqueNonEmpty([
+    getComponent(components, "locality"),
+    getComponent(components, "administrative_area_level_2"),
+  ]);
+  const route = getComponent(components, "route");
+  const exact = uniqueNonEmpty([
+    ...micro.slice(0, 2),
+    ...macro.slice(0, 2),
+  ]);
+  if (exact.length > 0) return exact.slice(0, 3).join(", ");
+  if (route && !isRoadLikeLabel(macro[0])) {
+    return uniqueNonEmpty([route, ...macro]).slice(0, 3).join(", ");
+  }
+  return null;
+};
 
 const formatGoogleResult = (result: any): GoogleAddressSuggestion => {
   const components = Array.isArray(result?.address_components) ? result.address_components : [];
@@ -59,6 +104,8 @@ export const reverseGeocodeWithGoogle = async (
     const data = await res.json();
     const first = data?.results?.[0];
     if (!first) return null;
+    const precise = buildPreciseGoogleLabel(first);
+    if (precise) return precise;
     const formatted = formatGoogleResult(first);
     if (formatted.primary_name && formatted.secondary_name && formatted.primary_name !== formatted.secondary_name) {
       return `${formatted.primary_name}, ${formatted.secondary_name}`;
@@ -67,6 +114,60 @@ export const reverseGeocodeWithGoogle = async (
   } catch {
     return null;
   }
+};
+
+export const formatPreciseReverseAddress = (
+  data: any,
+  fallbackLat?: number,
+  fallbackLon?: number,
+): string | null => {
+  const addr = data?.address || {};
+  const micro = uniqueNonEmpty([
+    data?.name,
+    addr.house_name,
+    addr.building,
+    addr.amenity,
+    addr.shop,
+    addr.office,
+    addr.tourism,
+    addr.leisure,
+    addr.hamlet,
+    addr.allotments,
+    addr.neighbourhood,
+    addr.suburb,
+    addr.quarter,
+    addr.residential,
+  ]);
+  const macro = uniqueNonEmpty([
+    addr.city_district,
+    addr.state_district,
+    addr.county,
+    addr.village,
+    addr.town,
+    addr.city,
+    data?.locality,
+    data?.city,
+    data?.principalSubdivision,
+  ]);
+  const route = uniqueNonEmpty([
+    addr.road,
+    addr.pedestrian,
+    addr.footway,
+  ]).find((value) => !isRoadLikeLabel(macro[0]) || !isRoadLikeLabel(value));
+  const exact = uniqueNonEmpty([
+    ...micro.slice(0, 2),
+    ...macro.slice(0, 2),
+  ]);
+
+  if (exact.length > 0) return exact.slice(0, 3).join(", ");
+  if (route || macro.length > 0) {
+    return uniqueNonEmpty([route, ...macro]).slice(0, 3).join(", ");
+  }
+  if (data?.display_name) return String(data.display_name).split(",").slice(0, 3).join(", ").trim();
+  if (Number.isFinite(fallbackLat) && Number.isFinite(fallbackLon)) {
+    return `${Number(fallbackLat).toFixed(5)}, ${Number(fallbackLon).toFixed(5)}`;
+  }
+  return null;
 };
 
 export const geocodeAddressWithGoogle = async (

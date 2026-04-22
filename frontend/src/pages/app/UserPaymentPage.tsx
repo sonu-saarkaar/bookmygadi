@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { authStore, backendApi, type Ride, type RideTracking } from "@/services/backendApi";
 import { Download, CheckCircle2, IndianRupee, Clock3, MapPin, Navigation, QrCode, Copy, WalletCards, Banknote, Smartphone, Building2, Phone, ChevronsRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { formatBookingDateTime } from "@/utils/datetime";
 
 const PAYEE_UPI_ID = "bookmygadi@upi";
 const PAYEE_NAME = "BookMyGaadi";
@@ -18,21 +19,7 @@ const distanceKm = (lat1?: number | null, lon1?: number | null, lat2?: number | 
   return R * c;
 };
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "-";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return dt.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const buildUpiUri = (amount: number, rideId: string) => {
-  const rideCode = `BMG${rideId.slice(-6).toUpperCase()}`;
+const buildUpiUri = (amount: number, rideCode: string) => {
   const note = encodeURIComponent(`BookMyGaadi ride ${rideCode}`);
   return `upi://pay?pa=${encodeURIComponent(PAYEE_UPI_ID)}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${Number(amount).toFixed(2)}&cu=INR&tn=${note}`;
 };
@@ -85,15 +72,15 @@ const UserPaymentPage = () => {
   const timeline = useMemo(() => {
     if (!ride) return [] as Array<{ label: string; time: string; note: string }>;
     return [
-      { label: "Ride Booked", time: formatDateTime(ride.created_at), note: "Booking request placed." },
+      { label: "Ride Booked", time: formatBookingDateTime(ride.created_at), note: "Booking request placed." },
       {
         label: "Pickup Scheduled",
-        time: ride.preference?.pickup_datetime || formatDateTime(ride.created_at),
+        time: ride.preference?.pickup_datetime || formatBookingDateTime(ride.created_at),
         note: `Pickup point: ${ride.pickup_location}`,
       },
       {
         label: "Ride Completed",
-        time: formatDateTime(ride.updated_at),
+        time: formatBookingDateTime(ride.updated_at),
         note: `Drop point: ${ride.destination}`,
       },
       {
@@ -104,7 +91,8 @@ const UserPaymentPage = () => {
     ];
   }, [ride, paid]);
 
-  const upiUri = useMemo(() => buildUpiUri(totalFare, rideId), [rideId, totalFare]);
+  const rideCode = ride?.booking_display_id || rideId;
+  const upiUri = useMemo(() => buildUpiUri(totalFare, rideCode), [rideCode, totalFare]);
   const qrImageUrl = useMemo(() => buildQrImageUrl(upiUri), [upiUri]);
 
   const copyUpiLink = async () => {
@@ -140,19 +128,17 @@ const UserPaymentPage = () => {
 
   const downloadReceipt = () => {
     if (!ride) return;
-    const rideCode = `BMG${ride.id.slice(-6).toUpperCase()}`;
     const lines = [
       "BOOKMYGADI PAYMENT RECEIPT",
       `Receipt ID: ${rideCode}`,
       `Ride ID: ${ride.id}`,
-      `Status: ${ride.status}`,
       `Payment Status: ${paid ? "PAID" : "PENDING"}`,
       `Pickup: ${ride.pickup_location}`,
       `Drop: ${ride.destination}`,
       `Total Fare: INR ${new Intl.NumberFormat("en-IN").format(totalFare)}`,
       `Travelled: ${travelledKm != null ? `${travelledKm.toFixed(1)} km` : "-"}`,
-      `Booked At: ${formatDateTime(ride.created_at)}`,
-      `Last Update: ${formatDateTime(ride.updated_at)}`,
+      `Booked At: ${formatBookingDateTime(ride.created_at)}`,
+      `Last Update: ${formatBookingDateTime(ride.updated_at)}`,
       "",
       "Timeline:",
       ...timeline.map((item) => `- ${item.label}: ${item.time} (${item.note})`),
@@ -201,7 +187,7 @@ const UserPaymentPage = () => {
           <div className="relative mt-5 grid grid-cols-2 gap-3 text-xs font-bold">
             <div className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Receipt</p>
-              <p className="mt-1 text-sm font-black">BMG{ride.id.slice(-6).toUpperCase()}</p>
+              <p className="mt-1 text-sm font-black">{ride.booking_display_id || ride.id}</p>
             </div>
             <div className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3 text-right">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Locked Amount</p>
@@ -283,7 +269,7 @@ const UserPaymentPage = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Ride</p>
-                  <p className="text-xs font-black text-slate-900">BMG{ride.id.slice(-6).toUpperCase()}</p>
+                  <p className="text-xs font-black text-slate-900">{ride.booking_display_id || ride.id}</p>
                 </div>
               </div>
 

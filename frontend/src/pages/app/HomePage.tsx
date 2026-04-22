@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { authStore, backendApi, type NearbyRider, type VehicleInventory } from "@/services/backendApi";
 import { playSound } from "@/services/notificationCenter";
-import { geocodeAddressWithGoogle, hasGoogleMapsApiKey, reverseGeocodeWithGoogle } from "@/services/googleMaps";
+import { formatPreciseReverseAddress, geocodeAddressWithGoogle, hasGoogleMapsApiKey, reverseGeocodeWithGoogle } from "@/services/googleMaps";
 import { motion, AnimatePresence } from "framer-motion";
 import { MapPin, Navigation, Map, ShieldCheck, CreditCard, ChevronRight, User, Search, Clock, Zap, CalendarDays, X, Check, Plus, Trash2, Car, Tag, ChevronDown, ChevronUp, Wallet, Shield, Crosshair } from "lucide-react";
 import { MapLocationPickerModal } from "../../components/map/MapLocationPickerModal";
@@ -361,7 +361,11 @@ const HomePage = () => {
   const [nearbyRiders, setNearbyRiders] = useState<NearbyRider[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [bookingPriority, setBookingPriority] = useState<'quick' | 'normal' | 'emergency'>('normal');
+  const [isRefreshingPickupLocation, setIsRefreshingPickupLocation] = useState(false);
   const locationRetryRef = useRef(0);
+  const lastResolvedCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastResolvedPickupLabelRef = useRef("");
+  const activePickupResolveIdRef = useRef(0);
 
   const handlePickupOffsetIncrease = () => {
     const nextOffset = pickupOffset + 1;
@@ -747,7 +751,7 @@ const handleDestinationSearch = async (query: string) => {
             sessionStorage.setItem(ACTIVE_BOOKING_STORAGE_KEY, JSON.stringify(payload));
             localStorage.setItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY, token);
             sessionStorage.setItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY, token);
-            navigate("/app/booking-confirmed", { state: payload, replace: true });
+            navigate(`/app/booking-confirmed/${activeRide.booking_display_id || activeRide.id}`, { state: payload, replace: true });
           }
         }
       } catch {}
@@ -790,9 +794,48 @@ const handleDestinationSearch = async (query: string) => {
   }, [pickup, destination, serviceMode, vehicleType, acMode, seater, selectedModel]);
 
   const formatCoordsLabel = (lat: number, lon: number) => `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const exactLocationPendingLabel = "Fetching exact location...";
 
   const saveLastKnownCoords = (lat: number, lon: number) => {
     localStorage.setItem(LAST_KNOWN_COORDS_KEY, JSON.stringify({ lat, lon, ts: Date.now() }));
+  };
+
+  const calculateDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadius = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const looksLikeStreetLevelLabel = (value: string) =>
+    /\b(road|rd|street|st|marg|lane|ln|nagar|chowk)\b/i.test(value);
+
+  const mergeStableLocationLabel = (nextLabel: string, movedMeters?: number | null) => {
+    const previousLabel = lastResolvedPickupLabelRef.current.trim();
+    const incomingLabel = String(nextLabel || "").trim();
+    if (!incomingLabel) return previousLabel || incomingLabel;
+    if (!previousLabel) return incomingLabel;
+    if (previousLabel.toLowerCase() === incomingLabel.toLowerCase()) return previousLabel;
+
+    const sameAreaMove = movedMeters == null || movedMeters < 120;
+    if (sameAreaMove) {
+      const previousLooksBetter = !looksLikeStreetLevelLabel(previousLabel) && looksLikeStreetLevelLabel(incomingLabel);
+      if (previousLooksBetter) return previousLabel;
+
+      const prevParts = previousLabel.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
+      const nextParts = incomingLabel.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
+      const overlaps = prevParts.some((part) => nextParts.includes(part));
+      if (overlaps && previousLabel.length >= incomingLabel.length) {
+        return previousLabel;
+      }
+    }
+
+    return incomingLabel;
   };
 
   const getLastKnownCoords = () => {
@@ -805,45 +848,6 @@ const handleDestinationSearch = async (query: string) => {
     } catch {
       return null;
     }
-  };
-
-  const buildReadableLocation = (data: any, lat: number, lon: number) => {
-    const addr = data?.address || {};
-    let specificLoc =
-      data?.name ||
-      addr.amenity ||
-      addr.building ||
-      addr.shop ||
-      addr.leisure ||
-      addr.office ||
-      addr.tourism ||
-      addr.neighbourhood ||
-      addr.suburb ||
-      addr.road ||
-      addr.village;
-    const pCity =
-      addr.city ||
-      addr.town ||
-      addr.county ||
-      addr.state_district ||
-      addr.state ||
-      data?.city ||
-      data?.locality ||
-      data?.principalSubdivision;
-
-    if (!specificLoc && data?.display_name) {
-      specificLoc = String(data.display_name).split(",")[0]?.trim();
-    }
-
-    if (specificLoc && pCity && specificLoc !== pCity && !specificLoc.includes(pCity)) {
-      return `${specificLoc}, ${pCity}`;
-    }
-
-    if (!specificLoc && (data?.locality || data?.city || data?.principalSubdivision)) {
-      specificLoc = data.locality || data.city || data.principalSubdivision;
-    }
-
-    return specificLoc || pCity || formatCoordsLabel(lat, lon);
   };
 
   const resolveLocationName = async (lat: number, lon: number) => {
@@ -863,7 +867,7 @@ const handleDestinationSearch = async (query: string) => {
         const data = await res.json();
         
         // Standard OS/BigDataCloud parsing
-        const label = buildReadableLocation(data, lat, lon);
+        const label = formatPreciseReverseAddress(data, lat, lon);
         if (label) return label;
       } catch {
         // Try next provider.
@@ -902,7 +906,7 @@ const handleDestinationSearch = async (query: string) => {
     const lastKnown = getLastKnownCoords();
     if (lastKnown) {
       setPickupCoords({ lat: lastKnown.lat, lng: lastKnown.lon });
-      setPickup(formatCoordsLabel(lastKnown.lat, lastKnown.lon));
+      setPickup(exactLocationPendingLabel);
       const label = await resolveLocationName(lastKnown.lat, lastKnown.lon);
       setPickup(label);
       return;
@@ -923,25 +927,110 @@ const handleDestinationSearch = async (query: string) => {
     setPickup("Approx Area");
   };
 
+  const getNativeLocationAgeMs = () => {
+    try {
+      const bridge = (window as any).AndroidInterface;
+      if (!bridge || typeof bridge.getNativeLocationAgeMs !== "function") return null;
+      const raw = bridge.getNativeLocationAgeMs();
+      if (raw == null || raw === "null" || raw === "") return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const requestFreshNativeLocation = () => {
+    try {
+      const bridge = (window as any).AndroidInterface;
+      if (bridge && typeof bridge.requestFreshLocation === "function") {
+        bridge.requestFreshLocation();
+      }
+    } catch {
+      // Ignore bridge refresh failures.
+    }
+  };
+
+  const readNativeLocation = () => {
+    try {
+      const bridge = (window as any).AndroidInterface;
+      if (!bridge || typeof bridge.getNativeLocation !== "function") return null;
+      const raw = bridge.getNativeLocation();
+      if (!raw || raw === "null") return null;
+      const parsed = JSON.parse(raw);
+      const lat = Number(parsed?.lat);
+      const lng = Number(parsed?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { lat, lng };
+    } catch {
+      return null;
+    }
+  };
+
+  const applyResolvedPickupLocation = async (lat: number, lng: number, accuracyMeters?: number | null) => {
+    if (accuracyMeters != null && Number.isFinite(accuracyMeters) && accuracyMeters > 80) {
+      return;
+    }
+
+    const previousCoords = lastResolvedCoordsRef.current;
+    const movedMeters = previousCoords
+      ? calculateDistanceMeters(previousCoords.lat, previousCoords.lng, lat, lng)
+      : null;
+    if (
+      previousCoords &&
+      movedMeters != null &&
+      movedMeters < 35 &&
+      lastResolvedPickupLabelRef.current &&
+      !isRefreshingPickupLocation
+    ) {
+      setPickupCoords({ lat, lng });
+      saveLastKnownCoords(lat, lng);
+      lastResolvedCoordsRef.current = { lat, lng };
+      return;
+    }
+
+    setPickupCoords({ lat, lng });
+    saveLastKnownCoords(lat, lng);
+    lastResolvedCoordsRef.current = { lat, lng };
+    setPickup(exactLocationPendingLabel);
+    const resolveId = Date.now();
+    activePickupResolveIdRef.current = resolveId;
+    const label = await resolveLocationName(lat, lng);
+    if (activePickupResolveIdRef.current !== resolveId) return;
+    const stableLabel = mergeStableLocationLabel(label, movedMeters);
+    lastResolvedPickupLabelRef.current = stableLabel;
+    setPickup(stableLabel);
+  };
+
   const detectLiveLocation = async (silent = false, nativeRetryCount = 0) => {
     // Forcefully show user that location is being fetched automatically
-    if(nativeRetryCount === 0) setPickup("Fetching Live Location...");
+    if (nativeRetryCount === 0) {
+      setIsRefreshingPickupLocation(true);
+      setPickup("Fetching Live Location...");
+    }
 
     // 1. Prioritize Android Native Location Bridge if available
     // Bypass strict webview geo constraints by pulling natively from the wrapper!
     if ((window as any).AndroidInterface && typeof (window as any).AndroidInterface.getNativeLocation === 'function') {
       try {
-        const nativeLocationStr = (window as any).AndroidInterface.getNativeLocation();
-        if (nativeLocationStr && nativeLocationStr !== "null") {
-          const { lat, lng } = JSON.parse(nativeLocationStr);
-          setPickupCoords({ lat, lng });
-          saveLastKnownCoords(lat, lng);
-          setPickup(formatCoordsLabel(lat, lng));
-          const label = await resolveLocationName(lat, lng);
-          setPickup(label);
+        if (nativeRetryCount === 0) {
+          requestFreshNativeLocation();
+        }
+
+        const nativeLocation = readNativeLocation();
+        const nativeAgeMs = getNativeLocationAgeMs();
+        const hasFreshNativeFix =
+          !!nativeLocation &&
+          (silent
+            ? nativeAgeMs == null || nativeAgeMs <= 300000
+            : nativeAgeMs == null || nativeAgeMs <= 15000);
+
+        if (hasFreshNativeFix && nativeLocation) {
+          await applyResolvedPickupLocation(nativeLocation.lat, nativeLocation.lng);
+          setIsRefreshingPickupLocation(false);
           return;
         } else if (nativeRetryCount < 6) {
-          // Sensor lock not yet ready, retry up to 3 seconds Native specifically
+          // Sensor lock not yet ready, retry up to 3 seconds Native specifically.
           setTimeout(() => detectLiveLocation(silent, nativeRetryCount + 1).catch(() => {}), 500);
           return;
         }
@@ -952,12 +1041,14 @@ const handleDestinationSearch = async (query: string) => {
 
     if (silent) {
       applyBestEffortLocationFallback(true).catch(() => undefined);
+      setIsRefreshingPickupLocation(false);
       return;
     }
 
     if (!navigator.geolocation) {
       setMessage("Geolocation not available");
       applyBestEffortLocationFallback(false).catch(() => undefined);
+      setIsRefreshingPickupLocation(false);
       return;
     }
     
@@ -966,12 +1057,9 @@ const handleDestinationSearch = async (query: string) => {
       async (pos) => {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
-        setPickupCoords({ lat, lng: lon });
-        saveLastKnownCoords(lat, lon);
+        await applyResolvedPickupLocation(lat, lon, pos.coords.accuracy);
         locationRetryRef.current = 0;
-        setPickup(formatCoordsLabel(lat, lon));
-        const label = await resolveLocationName(lat, lon);
-        setPickup(label);
+        setIsRefreshingPickupLocation(false);
       },
       (error) => {
         if (error.code === error.TIMEOUT || error.code === error.POSITION_UNAVAILABLE) {
@@ -985,12 +1073,9 @@ const handleDestinationSearch = async (query: string) => {
             async (pos) => {
               const lat = pos.coords.latitude;
               const lon = pos.coords.longitude;
-              setPickupCoords({ lat, lng: lon });
-              saveLastKnownCoords(lat, lon);
+              await applyResolvedPickupLocation(lat, lon, pos.coords.accuracy);
               locationRetryRef.current = 0;
-              setPickup(formatCoordsLabel(lat, lon));
-              const label = await resolveLocationName(lat, lon);
-              setPickup(label);
+              setIsRefreshingPickupLocation(false);
             },
             (fallbackError) => {
               // Only show hard warning when permission is actually denied.
@@ -999,6 +1084,7 @@ const handleDestinationSearch = async (query: string) => {
                 setTimeout(() => setMessage(''), 3000);
               }
               applyBestEffortLocationFallback(silent).catch(() => undefined);
+              setIsRefreshingPickupLocation(false);
             },
             { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
           );
@@ -1016,15 +1102,13 @@ const handleDestinationSearch = async (query: string) => {
                     async (pos) => {
                       const lat = pos.coords.latitude;
                       const lon = pos.coords.longitude;
-                      setPickupCoords({ lat, lng: lon });
-                      saveLastKnownCoords(lat, lon);
+                      await applyResolvedPickupLocation(lat, lon, pos.coords.accuracy);
                       locationRetryRef.current = 0;
-                      setPickup(formatCoordsLabel(lat, lon));
-                      const label = await resolveLocationName(lat, lon);
-                      setPickup(label);
+                      setIsRefreshingPickupLocation(false);
                     },
                     () => {
                       applyBestEffortLocationFallback(silent).catch(() => undefined);
+                      setIsRefreshingPickupLocation(false);
                     },
                     { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
                   );
@@ -1034,19 +1118,23 @@ const handleDestinationSearch = async (query: string) => {
                   setMessage("Location access blocked. Please allow it in app settings.");
                   setTimeout(() => setMessage(''), 3000);
                 }
+                setIsRefreshingPickupLocation(false);
               })
               .catch(() => {
                 applyBestEffortLocationFallback(silent).catch(() => undefined);
+                setIsRefreshingPickupLocation(false);
               });
           } else if (!silent) {
             setMessage("Location access blocked. Please allow it in app settings.");
             setTimeout(() => setMessage(''), 3000);
+            setIsRefreshingPickupLocation(false);
           }
           applyBestEffortLocationFallback(silent).catch(() => undefined);
           return;
         }
 
         applyBestEffortLocationFallback(silent).catch(() => undefined);
+        setIsRefreshingPickupLocation(false);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 }
     );
@@ -1055,6 +1143,56 @@ const handleDestinationSearch = async (query: string) => {
   useEffect(() => {
     // Attempt silent recovery from cache/native bridge on mount, but DO NOT trigger browser prompt.
     detectLiveLocation(true).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const refreshOnResume = () => {
+      if (document.visibilityState === "visible") {
+        detectLiveLocation(false).catch(() => undefined);
+      }
+    };
+
+    const onFocus = () => {
+      detectLiveLocation(false).catch(() => undefined);
+    };
+
+    document.addEventListener("visibilitychange", refreshOnResume);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshOnResume);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        if (position.coords.accuracy && position.coords.accuracy > 80) {
+          return;
+        }
+        const prev = lastResolvedCoordsRef.current;
+        if (!prev) {
+          void applyResolvedPickupLocation(lat, lng, position.coords.accuracy);
+          return;
+        }
+
+        const movedMeters = calculateDistanceMeters(prev.lat, prev.lng, lat, lng);
+        if (movedMeters >= 40) {
+          void applyResolvedPickupLocation(lat, lng, position.coords.accuracy);
+        }
+      },
+      () => {
+        // Keep manual refresh path as fallback; no noisy error for passive watcher.
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
   const onShowPrice = () => {
@@ -1462,7 +1600,7 @@ const handleDestinationSearch = async (query: string) => {
             onClick={() => detectLiveLocation(false)}
           >
              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-0.5 flex items-center gap-1 group-hover:scale-105 transition-transform"><MapPin size={12} className="fill-emerald-500/20"/> My Location</p>
-             <h2 className={`text-sm font-black text-gray-900 truncate max-w-[200px] text-center ${pickup === 'Fetching Live Location...' ? 'animate-pulse' : ''}`}>{pickup}</h2>
+             <h2 className={`text-sm font-black text-gray-900 truncate max-w-[220px] text-center ${isRefreshingPickupLocation || pickup === 'Fetching Live Location...' ? 'animate-pulse' : ''}`}>{pickup}</h2>
           </motion.div>
   
           <motion.div

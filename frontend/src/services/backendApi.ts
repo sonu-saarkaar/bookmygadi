@@ -60,6 +60,7 @@ export interface DriverVehicleDetails {
 
 export interface Ride {
   id: string;
+  booking_display_id: string;
   customer_id: string;
   driver_id?: string | null;
   driver_name?: string | null;
@@ -131,12 +132,30 @@ export interface RideTracking {
   destination: string;
   driver_live_lat?: number | null;
   driver_live_lng?: number | null;
+  driver_live_accuracy?: number | null;
+  driver_live_heading?: number | null;
+  driver_live_updated_at?: string | null;
   customer_live_lat?: number | null;
   customer_live_lng?: number | null;
+  customer_live_accuracy?: number | null;
+  customer_live_heading?: number | null;
+  customer_live_updated_at?: string | null;
   pickup_lat?: number | null;
   pickup_lng?: number | null;
   destination_lat?: number | null;
   destination_lng?: number | null;
+}
+
+export interface RideLocationSocketPayload extends Partial<RideTracking> {
+  event?: string;
+  type?: string;
+  actor?: "driver" | "customer";
+  lat?: number;
+  lng?: number;
+  accuracy?: number | null;
+  heading?: number | null;
+  ts?: string | null;
+  detail?: string;
 }
 
 export interface RidePaymentRead {
@@ -569,10 +588,16 @@ export const backendApi = {
       token,
     ),
 
-  updateCustomerLocation: (rideId: string, lat: number, lng: number, token: string) =>
+  updateCustomerLocation: (
+    rideId: string,
+    lat: number,
+    lng: number,
+    token: string,
+    meta?: { accuracy?: number | null; heading?: number | null; ts?: string | null },
+  ) =>
     request<RideTracking>(
       `${API_PREFIX}/rides/${rideId}/customer-location`,
-      { method: "POST", body: JSON.stringify({ lat, lng }) },
+      { method: "POST", body: JSON.stringify({ lat, lng, ...meta }) },
       token,
     ),
 

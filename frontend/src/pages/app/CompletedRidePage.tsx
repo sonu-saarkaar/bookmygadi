@@ -2,6 +2,7 @@ import { ChevronLeft, MapPin, CheckCircle2, MessageSquare, Star } from "lucide-r
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { backendApi, type Ride, authStore } from "@/services/backendApi";
+import { formatBookingDateTime } from "@/utils/datetime";
 
 const CompletedRidePage = () => {
   const { id } = useParams<{ id: string }>();
@@ -51,12 +52,10 @@ const CompletedRidePage = () => {
           <div className="p-5">
              <div className="flex justify-between items-start mb-6">
                  <div>
-                   <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
-                       {new Date(ride.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                       &nbsp;&middot;&nbsp;
-                       {new Date(ride.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                   </p>
-                   <p className="text-sm font-bold text-gray-500 mt-1">ID: BMG-{ride.id.slice(-6).toUpperCase()}</p>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                        {formatBookingDateTime(ride.created_at)}
+                    </p>
+                    <p className="text-sm font-bold text-gray-500 mt-1">ID: {ride.booking_display_id || ride.id}</p>
                  </div>
                  <div className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tighter border bg-emerald-50 text-emerald-600 border-emerald-100">
                      Paid

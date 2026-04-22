@@ -1,22 +1,60 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Fix generic Leaflet z-index overflow issues which usually spill into Modals/other sections
-const leafletCssOverrides = ".leaflet-container { z-index: 0 !important; } .leaflet-pane { z-index: 10 !important; } .leaflet-top, .leaflet-bottom { z-index: 20 !important; } .leaflet-control { z-index: 30 !important; }";
+const leafletCssOverrides =
+  ".leaflet-container { z-index: 0 !important; } .leaflet-pane { z-index: 10 !important; } .leaflet-top, .leaflet-bottom { z-index: 20 !important; } .leaflet-control { z-index: 30 !important; }";
 
 interface LiveMapProps {
   pickup: { lat: number; lng: number } | null;
   drop?: { lat: number; lng: number } | null;
-  distance?: string;
-  duration?: string;
   className?: string;
+  interactive?: boolean;
+  pickupLabel?: string;
+  dropLabel?: string;
   radiusCenter?: { lat: number; lng: number } | null;
   radiusKm?: number;
   showNearbyOverlay?: boolean;
   nearbyRiders?: Array<{ id: string; lat: number; lng: number; label?: string }>;
   autoCenter?: boolean;
+  pickupHeading?: number | null;
+  dropHeading?: number | null;
+  followMarker?: "pickup" | "drop" | "both";
 }
+
+const createDotIcon = (color: string) =>
+  L.divIcon({
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 0 10px rgba(0,0,0,0.22);transform:translate(-50%,-50%);"></div>`,
+    className: "",
+    iconSize: [0, 0],
+  });
+
+const createCarIcon = (heading = 0) =>
+  L.divIcon({
+    html: `<div style="transform: translate(-50%, -50%) rotate(${heading}deg); transition: transform 300ms linear;"><div style="background:white; padding:6px; border-radius:999px; box-shadow:0 6px 18px rgba(0,0,0,0.18);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg></div></div>`,
+    className: "bmg-car-marker",
+    iconSize: [0, 0],
+  });
+
+const animateMarker = (marker: L.Marker, target: L.LatLngExpression, durationMs: number) => {
+  const start = marker.getLatLng();
+  const end = L.latLng(target);
+  const startedAt = performance.now();
+  let frameId = 0;
+
+  const step = (now: number) => {
+    const progress = Math.min(1, (now - startedAt) / durationMs);
+    const lat = start.lat + (end.lat - start.lat) * progress;
+    const lng = start.lng + (end.lng - start.lng) * progress;
+    marker.setLatLng([lat, lng]);
+    if (progress < 1) {
+      frameId = window.requestAnimationFrame(step);
+    }
+  };
+
+  frameId = window.requestAnimationFrame(step);
+  return () => window.cancelAnimationFrame(frameId);
+};
 
 export const LiveMap: React.FC<LiveMapProps> = ({
   pickup,
@@ -26,112 +64,159 @@ export const LiveMap: React.FC<LiveMapProps> = ({
   radiusKm = 10,
   showNearbyOverlay = false,
   nearbyRiders = [],
-  autoCenter = true
+  autoCenter = true,
+  pickupHeading,
+  dropHeading,
+  followMarker = "both",
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletMap = useRef<L.Map | null>(null);
-  
-  // Layers
-  const groupLayerRef = useRef<L.FeatureGroup | null>(null);
+  const markerLayerRef = useRef<L.FeatureGroup | null>(null);
+  const overlayLayerRef = useRef<L.FeatureGroup | null>(null);
+  const pickupMarkerRef = useRef<L.Marker | null>(null);
+  const dropMarkerRef = useRef<L.Marker | null>(null);
+  const cleanupPickupAnimRef = useRef<(() => void) | null>(null);
+  const cleanupDropAnimRef = useRef<(() => void) | null>(null);
+  const hasCenteredRef = useRef(false);
 
-  // Initialize Map
   useEffect(() => {
     if (!mapRef.current || leafletMap.current) return;
 
-    // Use Google Maps Tiles
     const map = L.map(mapRef.current, {
       zoomControl: false,
       attributionControl: false,
-      scrollWheelZoom: true,  // prevent accidental zoom scrolling
-      dragging: true, // changed to true for interactivity
+      scrollWheelZoom: true,
+      dragging: true,
     });
-    
-    // Setting coordinates manually temporarily if fitBounds is slow or not working
-    map.setView([20.5937, 78.9629], 5); // default center (India)
 
-    // Using a different google tile mirror to be safe
-    L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+    map.setView([20.5937, 78.9629], 5);
+    L.tileLayer("https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", {
       maxZoom: 20,
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+      subdomains: ["mt0", "mt1", "mt2", "mt3"],
     }).addTo(map);
 
-    groupLayerRef.current = L.featureGroup().addTo(map);
+    markerLayerRef.current = L.featureGroup().addTo(map);
+    overlayLayerRef.current = L.featureGroup().addTo(map);
     leafletMap.current = map;
 
-    // Force size invalidation later to ensure tiles load
-    setTimeout(() => {
-        map.invalidateSize();
-    }, 200);
+    window.setTimeout(() => map.invalidateSize(), 200);
 
     return () => {
+      cleanupPickupAnimRef.current?.();
+      cleanupDropAnimRef.current?.();
       map.remove();
       leafletMap.current = null;
     };
   }, []);
 
-  // Update Markers & Radius Circle
   useEffect(() => {
     const map = leafletMap.current;
-    const group = groupLayerRef.current;
-    if (!map || !group) return;
+    const markerLayer = markerLayerRef.current;
+    if (!map || !markerLayer) return;
 
-    // Clear old layers
-    group.clearLayers();
+    if (pickup) {
+      if (!pickupMarkerRef.current) {
+        pickupMarkerRef.current = L.marker([pickup.lat, pickup.lng], {
+          icon: createCarIcon(pickupHeading ?? 0),
+          zIndexOffset: 1000,
+        }).addTo(markerLayer);
+      } else {
+        cleanupPickupAnimRef.current?.();
+        cleanupPickupAnimRef.current = animateMarker(
+          pickupMarkerRef.current,
+          [pickup.lat, pickup.lng],
+          1400,
+        );
+        pickupMarkerRef.current.setIcon(createCarIcon(pickupHeading ?? 0));
+      }
+    } else if (pickupMarkerRef.current) {
+      markerLayer.removeLayer(pickupMarkerRef.current);
+      pickupMarkerRef.current = null;
+    }
 
-    // 1. Draw Radius Circle around pickup/radius center
+    if (drop) {
+      if (!dropMarkerRef.current) {
+        dropMarkerRef.current = L.marker([drop.lat, drop.lng], {
+          icon: createDotIcon("#2563eb"),
+        }).addTo(markerLayer);
+      } else {
+        cleanupDropAnimRef.current?.();
+        cleanupDropAnimRef.current = animateMarker(dropMarkerRef.current, [drop.lat, drop.lng], 1400);
+        dropMarkerRef.current.setIcon(createDotIcon("#2563eb"));
+      }
+    } else if (dropMarkerRef.current) {
+      markerLayer.removeLayer(dropMarkerRef.current);
+      dropMarkerRef.current = null;
+    }
+
+    if (!autoCenter) return;
+
+    const target =
+      followMarker === "pickup"
+        ? pickup
+        : followMarker === "drop"
+          ? drop
+          : null;
+
+    if (target) {
+      map.panTo([target.lat, target.lng], { animate: true, duration: 1.2 });
+      return;
+    }
+
+    if (!hasCenteredRef.current && markerLayer.getLayers().length > 0) {
+      hasCenteredRef.current = true;
+      window.setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds(markerLayer.getBounds(), { padding: [40, 40], animate: true, duration: 1.2 });
+      }, 180);
+    }
+  }, [pickup?.lat, pickup?.lng, pickupHeading, drop?.lat, drop?.lng, dropHeading, autoCenter, followMarker]);
+
+  useEffect(() => {
+    const map = leafletMap.current;
+    const overlayLayer = overlayLayerRef.current;
+    if (!map || !overlayLayer) return;
+
+    overlayLayer.clearLayers();
+
     const center = radiusCenter || pickup;
     if (showNearbyOverlay && center) {
-      const circle = L.circle([center.lat, center.lng], {
-        radius: radiusKm * 1000,
-        color: '#2563eb', // Next JS Blue
-        weight: 2,
-        fillColor: '#60a5fa',
-        fillOpacity: 0.15,
-        interactive: false,
-      });
-      group.addLayer(circle);
+      overlayLayer.addLayer(
+        L.circle([center.lat, center.lng], {
+          radius: radiusKm * 1000,
+          color: "#2563eb",
+          weight: 2,
+          fillColor: "#60a5fa",
+          fillOpacity: 0.15,
+          interactive: false,
+        }),
+      );
 
-      // User Pin (Center highlight)
-      const userHtml = '<div style="transform: translate(-50%, -100%); width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2ZM12 11.5C10.62 11.5 9.5 10.38 9.5 9C9.5 7.62 10.62 6.5 12 6.5C13.38 6.5 14.5 7.62 14.5 9C14.5 10.38 13.38 11.5 12 11.5Z" fill="#1d4ed8"/><circle cx="12" cy="9" r="2.5" fill="white"/></svg></div>';
-      const userIcon = L.divIcon({ html: userHtml, className: "bg-transparent border-none", iconSize: [0, 0] });
-      group.addLayer(L.marker([center.lat, center.lng], { icon: userIcon, zIndexOffset: 1000 }));
-    } 
-    else if (pickup && !showNearbyOverlay) {
-        // Fallback marker if just routing
-        const puIcon = L.divIcon({ html: '<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 0 5px rgba(0,0,0,0.5);transform:translate(-50%,-50%);"></div>', className: "", iconSize: [0,0]});
-        group.addLayer(L.marker([pickup.lat, pickup.lng], { icon: puIcon }));
-    }
-
-    // 2. Add Nearby Riders within bounding box / radius
-    if (showNearbyOverlay && center && nearbyRiders.length > 0) {
-      nearbyRiders.forEach(rider => {
-          
-        // Check if inside circle strictly mathematically to honor radius constraint
+      nearbyRiders.forEach((rider) => {
         const dist = map.distance([center.lat, center.lng], [rider.lat, rider.lng]);
-        if (dist <= radiusKm * 1000) {
-            const carSVG = '<div style="background:white; padding:4px; border-radius:50%; box-shadow:0 2px 5px rgba(0,0,0,0.2); transform: translate(-50%, -50%);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg></div>';
-            const driverIcon = L.divIcon({ html: carSVG, className: "bg-transparent", iconSize: [0, 0] });
-            group.addLayer(L.marker([rider.lat, rider.lng], { icon: driverIcon }));
-        }
+        if (dist > radiusKm * 1000) return;
+        overlayLayer.addLayer(
+          L.marker([rider.lat, rider.lng], {
+            icon: createDotIcon("#f59e0b"),
+          }),
+        );
       });
-    }
 
-    // Fit map bounds EXACTLY to the group/circle area seamlessly with padding
-    if (autoCenter && group.getLayers().length > 0) {
-      // Small delay to ensure bounds are correctly retrieved after container sizing
-      setTimeout(() => {
+      if (autoCenter) {
+        window.setTimeout(() => {
           map.invalidateSize();
-          map.fitBounds(group.getBounds(), { padding: [30, 30], animate: true, duration: 1.5 });
-      }, 300);
+          map.fitBounds(overlayLayer.getBounds(), { padding: [30, 30], animate: true, duration: 1.2 });
+        }, 150);
+      }
     }
-  }, [pickup, drop, radiusCenter, showNearbyOverlay, radiusKm, nearbyRiders, autoCenter]);
+  }, [pickup?.lat, pickup?.lng, radiusCenter?.lat, radiusCenter?.lng, showNearbyOverlay, radiusKm, nearbyRiders, autoCenter]);
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: leafletCssOverrides }} />
-      <div 
-        ref={mapRef} 
-        className={"w-full h-full relative isolate " + className}
+      <div
+        ref={mapRef}
+        className={`w-full h-full relative isolate ${className}`}
         style={{ zIndex: 0 }}
       />
     </>

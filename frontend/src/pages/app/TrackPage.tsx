@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { authStore, backendApi, type Ride, type RideMessage, type RideTracking, type UserProfile } from "@/services/backendApi";
+import { authStore, backendApi, type Ride, type RideLocationSocketPayload, type RideMessage, type RideTracking, type UserProfile } from "@/services/backendApi";
 import { LiveMap } from "@/components/LiveMap";
 import { Navigation, MapPin, Search, Send, Clock, LocateFixed, MessageSquare, Car, CalendarClock } from "lucide-react";
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
@@ -27,6 +27,11 @@ const distanceKm = (aLat?: number | null, aLng?: number | null, bLat?: number | 
   return R * c;
 };
 
+const moveDistanceMeters = (a?: { lat: number; lng: number } | null, b?: { lat: number; lng: number } | null) => {
+  if (!a || !b) return Infinity;
+  return distanceKm(a.lat, a.lng, b.lat, b.lng) * 1000;
+};
+
 const TrackPage = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [rides, setRides] = useState<Ride[]>([]);
@@ -37,6 +42,10 @@ const TrackPage = () => {
   const [messages, setMessages] = useState<RideMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [error, setError] = useState("");
+  const [wsConnected, setWsConnected] = useState(false);
+  const [weakGps, setWeakGps] = useState(false);
+  const lastSentCustomerLocationRef = useRef<{ lat: number; lng: number; sentAt: number } | null>(null);
+  const wsConnectedRef = useRef(false);
 
   const activeRides = useMemo(() => rides.filter(r => ["accepted", "arriving", "in_progress"].includes(r.status)), [rides]);
   const upcomingRides = useMemo(() => rides.filter(r => ["requested", "pending"].includes(r.status)), [rides]);
@@ -92,18 +101,68 @@ const TrackPage = () => {
     backendApi.getRideTracking(selectedRideId, token).then(setTracking).catch(() => setTracking(null));
 
     let ws: WebSocket | null = null;
-    const wsUrl = backendApi.rideWebsocketUrl(selectedRideId);
+    const baseWsUrl = backendApi.rideWebsocketUrl(selectedRideId);
+    const wsUrl = baseWsUrl && token ? `${baseWsUrl}${baseWsUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : null;
     if (wsUrl) {
       try {
         ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          wsConnectedRef.current = true;
+          setWsConnected(true);
+          setError("");
+        };
+        ws.onclose = () => {
+          wsConnectedRef.current = false;
+          setWsConnected(false);
+        };
+        ws.onerror = () => {
+          wsConnectedRef.current = false;
+          setWsConnected(false);
+        };
         ws.onmessage = (event) => {
           try {
-            const payload = JSON.parse(event.data) as RealtimePayload;
+            const payload = JSON.parse(event.data) as RealtimePayload & RideLocationSocketPayload;
             if (payload.event === "ride_message_created" && payload.message) {
               setMessages((prev) => [...prev, payload.message as RideMessage]);
             }
             if (payload.event === "ride_status_updated" && payload.ride) {
               setRides((prev) => prev.map((r) => (r.id === payload.ride!.id ? payload.ride! : r)));
+            }
+            if ((payload.event === "location_update" || payload.type === "location_update") && payload.ride_id === selectedRideId) {
+              setTracking((prev) => ({
+                ...(prev || { ride_id: selectedRideId, status: selectedRide?.status || "accepted", pickup_location: selectedRide?.pickup_location || "", destination: selectedRide?.destination || "" }),
+                ...(payload.driver_live_lat != null ? {
+                  driver_live_lat: payload.driver_live_lat,
+                  driver_live_lng: payload.driver_live_lng,
+                  driver_live_accuracy: payload.driver_live_accuracy,
+                  driver_live_heading: payload.driver_live_heading,
+                  driver_live_updated_at: payload.driver_live_updated_at,
+                } : {}),
+                ...(payload.customer_live_lat != null ? {
+                  customer_live_lat: payload.customer_live_lat,
+                  customer_live_lng: payload.customer_live_lng,
+                  customer_live_accuracy: payload.customer_live_accuracy,
+                  customer_live_heading: payload.customer_live_heading,
+                  customer_live_updated_at: payload.customer_live_updated_at,
+                } : {}),
+                ...(payload.actor === "driver" ? {
+                  driver_live_lat: payload.lat ?? prev?.driver_live_lat ?? null,
+                  driver_live_lng: payload.lng ?? prev?.driver_live_lng ?? null,
+                  driver_live_accuracy: payload.accuracy ?? prev?.driver_live_accuracy ?? null,
+                  driver_live_heading: payload.heading ?? prev?.driver_live_heading ?? null,
+                  driver_live_updated_at: payload.ts ?? prev?.driver_live_updated_at ?? null,
+                } : {}),
+                ...(payload.actor === "customer" ? {
+                  customer_live_lat: payload.lat ?? prev?.customer_live_lat ?? null,
+                  customer_live_lng: payload.lng ?? prev?.customer_live_lng ?? null,
+                  customer_live_accuracy: payload.accuracy ?? prev?.customer_live_accuracy ?? null,
+                  customer_live_heading: payload.heading ?? prev?.customer_live_heading ?? null,
+                  customer_live_updated_at: payload.ts ?? prev?.customer_live_updated_at ?? null,
+                } : {}),
+              }));
+            }
+            if (payload.event === "error" && payload.detail) {
+              setError(payload.detail);
             }
           } catch {
             // ignore
@@ -115,14 +174,61 @@ const TrackPage = () => {
     }
 
     const pull = window.setInterval(() => {
+      if (wsConnectedRef.current) return;
       backendApi.getRideTracking(selectedRideId, token).then(setTracking).catch(() => undefined);
-    }, 4000);
+    }, 2500);
+
+    let watchId: number | null = null;
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const accuracy = position.coords.accuracy;
+          const heading = typeof position.coords.heading === "number" ? position.coords.heading : null;
+          setWeakGps(accuracy > 35);
+
+          setTracking((prev) => ({
+            ...(prev || { ride_id: selectedRideId, status: selectedRide?.status || "accepted", pickup_location: selectedRide?.pickup_location || "", destination: selectedRide?.destination || "" }),
+            customer_live_lat: lat,
+            customer_live_lng: lng,
+            customer_live_accuracy: accuracy,
+            customer_live_heading: heading,
+            customer_live_updated_at: new Date().toISOString(),
+          }));
+
+          const lastSent = lastSentCustomerLocationRef.current;
+          const movedMeters = moveDistanceMeters(lastSent ? { lat: lastSent.lat, lng: lastSent.lng } : null, { lat, lng });
+          const now = Date.now();
+          if (lastSent && movedMeters < 8 && now - lastSent.sentAt < 1500) {
+            return;
+          }
+
+          lastSentCustomerLocationRef.current = { lat, lng, sentAt: now };
+          const meta = { accuracy, heading, ts: new Date().toISOString() };
+
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "customer_location", lat, lng, ...meta }));
+          } else {
+            backendApi.updateCustomerLocation(selectedRideId, lat, lng, token, meta).catch(() => undefined);
+          }
+        },
+        (geoError) => {
+          setWeakGps(false);
+          if (geoError.code === geoError.PERMISSION_DENIED) {
+            setError("Location permission denied for live tracking");
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 },
+      );
+    }
 
     return () => {
       window.clearInterval(pull);
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
       ws?.close();
     };
-  }, [selectedRideId]);
+  }, [selectedRideId, selectedRide?.status, selectedRide?.pickup_location, selectedRide?.destination]);
 
   const sendMessage = async () => {
     const token = authStore.getToken();
@@ -138,12 +244,6 @@ const TrackPage = () => {
       setError(err instanceof Error ? err.message : "Message send failed");
     }
   };
-
-  const activeLabel = useMemo(() => {
-    const s = (selectedRide?.status || "").toLowerCase();
-    if (!s) return "-";
-    return s.replace("_", " ");
-  }, [selectedRide?.status]);
 
   const mapStart = useMemo(() => {
     if (tracking?.driver_live_lat != null && tracking?.driver_live_lng != null) {
@@ -191,14 +291,14 @@ const TrackPage = () => {
       
        {/* Background Map layer */}
        <div className="absolute inset-0 z-0 h-full w-full">
-         <LiveMap
+          <LiveMap
           pickup={mapStart}
           drop={mapEnd}
-          distance={`${mapDistanceKm.toFixed(1)} km`}
-          duration={`${approxMinutes} mins`}
             interactive
             autoCenter
             followMarker="pickup"
+            pickupHeading={tracking?.driver_live_heading}
+            dropHeading={tracking?.customer_live_heading}
           pickupLabel={tracking?.pickup_location || selectedRide?.pickup_location}
           dropLabel={tracking?.destination || selectedRide?.destination}
           className="h-full w-full"
@@ -217,7 +317,11 @@ const TrackPage = () => {
             </div>
           </div>
           
-          {error && <p className="mb-3 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-500 pointer-events-auto">{error}</p>}
+          {(error || weakGps) && (
+            <p className={`mb-3 rounded-xl px-4 py-3 text-xs font-medium pointer-events-auto ${error ? "border border-rose-100 bg-rose-50 text-rose-500" : "border border-amber-100 bg-amber-50 text-amber-700"}`}>
+              {error || "Weak GPS detected. Refining your live location..."}
+            </p>
+          )}
           
           {/* Tabs */}
           <div className="flex bg-white/90  p-1 rounded-2xl mb-3 text-xs font-bold shadow-soft pointer-events-auto">
@@ -246,7 +350,7 @@ const TrackPage = () => {
                  ) : (
                     displayRides.map((ride) => (
                       <option key={ride.id} value={ride.id}>
-                        {ride.pickup_location} → {ride.destination} ({ride.status})
+                        {ride.pickup_location} → {ride.destination}
                       </option>
                     ))
                  )}
@@ -298,8 +402,8 @@ const TrackPage = () => {
                 <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-xl"></div>
                 <div className="flex justify-between items-start mb-4">
                    <div>
-                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</p>
-                     <p className="text-lg font-black capitalize text-emerald-400">{activeLabel}</p>
+                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ride</p>
+                     <p className="text-lg font-black capitalize text-emerald-400">Live Tracking</p>
                    </div>
                    <div className="text-right">
                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Agreed Fare</p>
@@ -312,8 +416,8 @@ const TrackPage = () => {
                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Driver</p>
                      <p className="text-sm font-bold">{selectedRide.driver_name || "Pending Assignment"}</p>
                    </div>
-                   <div className={`px-3 py-1.5 rounded-full text-xs font-bold ${selectedRide.payment_status === 'paid' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                      {selectedRide.payment_status || "Unpaid"}
+                   <div className={`px-3 py-1.5 rounded-full text-xs font-bold ${wsConnected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                      {wsConnected ? "Live WS" : "Polling"}
                    </div>
                 </div>
               </div>
@@ -322,12 +426,16 @@ const TrackPage = () => {
                   <div className="bg-white rounded-[20px] p-3 border border-gray-100 shadow-sm">
                      <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2"><Navigation size={14}/></div>
                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Rider Loc</p>
-                     <p className="text-xs font-bold text-gray-900 truncate">{tracking?.driver_live_lat?.toFixed(4) || "..."} , {tracking?.driver_live_lng?.toFixed(4) || "..."}</p>
+                     <p className="text-xs font-bold text-gray-900 truncate">
+                       {tracking?.driver_live_updated_at ? new Date(tracking.driver_live_updated_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}
+                     </p>
                   </div>
                   <div className="bg-white rounded-[20px] p-3 border border-gray-100 shadow-sm">
                      <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2"><MapPin size={14}/></div>
                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Your Loc</p>
-                     <p className="text-xs font-bold text-gray-900 truncate">{tracking?.customer_live_lat?.toFixed(4) || "..."} , {tracking?.customer_live_lng?.toFixed(4) || "..."}</p>
+                     <p className="text-xs font-bold text-gray-900 truncate">
+                       {tracking?.customer_live_accuracy != null ? `±${Math.round(tracking.customer_live_accuracy)} m` : "Locating..."}
+                     </p>
                   </div>
                </div>
 

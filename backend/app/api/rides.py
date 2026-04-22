@@ -1,4 +1,5 @@
 import random
+import asyncio
 from math import atan2, cos, radians, sin, sqrt
 from datetime import datetime
 
@@ -7,7 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
 from app.api.realtime import realtime_manager
-from app.db import get_db
+from app.core.notifications import notify_new_ride_request_batch, notify_ride_cancelled
+from app.db import engine, get_db
 from app.models import AdminSupportTicket, Ride, RideFeedback, RideMessage, RideNegotiation, RidePreference, User
 from app.schemas import (
     LocationUpdate,
@@ -30,6 +32,35 @@ from app.schemas import (
 
 router = APIRouter(prefix="/rides", tags=["rides"])
 
+MAX_LOCATION_ACCURACY_METERS = 50.0
+MAX_SPEED_KMH = 180.0
+
+
+async def _delayed_retry_ride_notification(
+    ride_id: str,
+    driver_tokens: list[str],
+    pickup: str,
+    destination: str,
+    fare: float,
+) -> None:
+    if not driver_tokens:
+        return
+    await asyncio.sleep(15)
+    with Session(engine) as retry_db:
+        ride = retry_db.get(Ride, ride_id)
+        if not ride or ride.status != "pending":
+            return
+    try:
+        await notify_new_ride_request_batch(
+            driver_tokens,
+            pickup=pickup,
+            destination=destination,
+            fare=fare,
+            ride_id=ride_id,
+        )
+    except Exception:
+        pass
+
 
 def _distance_km(pickup_lat: float | None, pickup_lng: float | None, destination_lat: float | None, destination_lng: float | None) -> float | None:
     if pickup_lat is None or pickup_lng is None or destination_lat is None or destination_lng is None:
@@ -40,6 +71,68 @@ def _distance_km(pickup_lat: float | None, pickup_lng: float | None, destination
     a = sin(dlat / 2) ** 2 + cos(radians(pickup_lat)) * cos(radians(destination_lat)) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return r * c
+
+
+def _distance_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
+    return (_distance_km(a_lat, a_lng, b_lat, b_lng) or 0.0) * 1000
+
+
+def _validate_location_payload(
+    ride: Ride,
+    actor: str,
+    payload: LocationUpdate,
+) -> tuple[float | None, datetime]:
+    accuracy = payload.accuracy
+    if accuracy is not None and accuracy > MAX_LOCATION_ACCURACY_METERS:
+        raise HTTPException(status_code=422, detail="Location accuracy too weak")
+
+    observed_at = payload.ts or datetime.utcnow()
+    prev_lat = ride.driver_live_lat if actor == "driver" else ride.customer_live_lat
+    prev_lng = ride.driver_live_lng if actor == "driver" else ride.customer_live_lng
+    prev_ts = ride.driver_live_updated_at if actor == "driver" else ride.customer_live_updated_at
+    if (
+        prev_lat is not None
+        and prev_lng is not None
+        and prev_ts is not None
+        and observed_at <= prev_ts
+    ):
+        raise HTTPException(status_code=409, detail="Out-of-order location update")
+
+    if (
+        prev_lat is not None
+        and prev_lng is not None
+        and prev_ts is not None
+    ):
+        seconds = max((observed_at - prev_ts).total_seconds(), 0.001)
+        distance_m = _distance_meters(prev_lat, prev_lng, payload.lat, payload.lng)
+        speed_kmh = (distance_m / seconds) * 3.6
+        if speed_kmh > MAX_SPEED_KMH:
+            raise HTTPException(status_code=422, detail="Location jump rejected")
+
+    return accuracy, observed_at
+
+
+def _tracking_payload(ride: Ride) -> RideTrackingRead:
+    return RideTrackingRead(
+        ride_id=ride.id,
+        status=ride.status,
+        pickup_location=ride.pickup_location,
+        destination=ride.destination,
+        driver_live_lat=ride.driver_live_lat,
+        driver_live_lng=ride.driver_live_lng,
+        driver_live_accuracy=ride.driver_live_accuracy,
+        driver_live_heading=ride.driver_live_heading,
+        driver_live_updated_at=ride.driver_live_updated_at,
+        customer_live_lat=ride.customer_live_lat,
+        customer_live_lng=ride.customer_live_lng,
+        customer_live_accuracy=ride.customer_live_accuracy,
+        customer_live_heading=ride.customer_live_heading,
+        customer_live_updated_at=ride.customer_live_updated_at,
+        pickup_lat=ride.pickup_lat,
+        pickup_lng=ride.pickup_lng,
+        destination_lat=ride.destination_lat,
+        destination_lng=ride.destination_lng,
+    )
 
 
 @router.post("", response_model=RideRead, status_code=status.HTTP_201_CREATED)
@@ -108,6 +201,36 @@ async def create_ride(
     db.commit()
     db.refresh(ride)
 
+    nearby_driver_tokens = [
+        user.fcm_token
+        for user in db.query(User).filter(User.role == "driver").all()
+        if user.fcm_token
+    ]
+    if nearby_driver_tokens:
+        estimated_fare = float(ride.requested_fare or ride.estimated_fare_max or ride.estimated_fare_min or 0)
+        first_wave = nearby_driver_tokens[:3]
+        second_wave = nearby_driver_tokens[3:6]
+        try:
+            await notify_new_ride_request_batch(
+                first_wave,
+                pickup=ride.pickup_location,
+                destination=ride.destination,
+                fare=estimated_fare,
+                ride_id=ride.id,
+            )
+        except Exception:
+            pass
+        if second_wave:
+            asyncio.create_task(
+                _delayed_retry_ride_notification(
+                    ride_id=ride.id,
+                    driver_tokens=second_wave,
+                    pickup=ride.pickup_location,
+                    destination=ride.destination,
+                    fare=estimated_fare,
+                )
+            )
+
     await realtime_manager.broadcast(ride.id, {"event": "ride_created", "ride": RideRead.model_validate(ride).model_dump(mode="json")})
     return ride
 
@@ -170,6 +293,21 @@ async def update_ride_status(
 
     db.commit()
     db.refresh(ride)
+
+    if payload.status == "cancelled":
+        if ride.driver_id:
+            driver = db.get(User, ride.driver_id)
+            if driver and driver.fcm_token:
+                try:
+                    await notify_ride_cancelled(driver.fcm_token, target_role="driver", ride_id=ride.id)
+                except Exception:
+                    pass
+        customer = db.get(User, ride.customer_id)
+        if customer and customer.fcm_token:
+            try:
+                await notify_ride_cancelled(customer.fcm_token, target_role="customer", ride_id=ride.id)
+            except Exception:
+                pass
 
     await realtime_manager.broadcast(ride.id, {"event": "ride_status_updated", "ride": RideRead.model_validate(ride).model_dump(mode="json")})
     return ride
@@ -405,24 +543,35 @@ def update_customer_location(
     if current_user.id != ride.customer_id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Only customer can update this location")
 
+    accuracy, observed_at = _validate_location_payload(ride, "customer", payload)
     ride.customer_live_lat = payload.lat
     ride.customer_live_lng = payload.lng
+    ride.customer_live_accuracy = accuracy
+    ride.customer_live_heading = payload.heading
+    ride.customer_live_updated_at = observed_at
     db.commit()
     db.refresh(ride)
-    return RideTrackingRead(
-        ride_id=ride.id,
-        status=ride.status,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        driver_live_lat=ride.driver_live_lat,
-        driver_live_lng=ride.driver_live_lng,
-        customer_live_lat=ride.customer_live_lat,
-        customer_live_lng=ride.customer_live_lng,
-        pickup_lat=ride.pickup_lat,
-        pickup_lng=ride.pickup_lng,
-        destination_lat=ride.destination_lat,
-        destination_lng=ride.destination_lng,
+    return_payload = _tracking_payload(ride)
+    return_payload_dict = return_payload.model_dump(mode="json")
+    return_payload_dict.update(
+        {
+            "event": "location_update",
+            "type": "location_update",
+            "actor": "customer",
+            "lat": payload.lat,
+            "lng": payload.lng,
+            "accuracy": accuracy,
+            "heading": payload.heading,
+            "ts": observed_at.isoformat(),
+        }
     )
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(realtime_manager.broadcast(ride.id, return_payload_dict))
+    except RuntimeError:
+        pass
+    return return_payload
 
 
 @router.post("/{ride_id}/payment", response_model=PaymentReceiveRead)
@@ -469,20 +618,7 @@ def get_tracking(
         raise HTTPException(status_code=404, detail="Ride not found")
     if current_user.role != "admin" and current_user.id not in {ride.customer_id, ride.driver_id}:
         raise HTTPException(status_code=403, detail="Access denied")
-    return RideTrackingRead(
-        ride_id=ride.id,
-        status=ride.status,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        driver_live_lat=ride.driver_live_lat,
-        driver_live_lng=ride.driver_live_lng,
-        customer_live_lat=ride.customer_live_lat,
-        customer_live_lng=ride.customer_live_lng,
-        pickup_lat=ride.pickup_lat,
-        pickup_lng=ride.pickup_lng,
-        destination_lat=ride.destination_lat,
-        destination_lng=ride.destination_lng,
-    )
+    return _tracking_payload(ride)
 
 
 @router.post("/{ride_id}/feedback", response_model=RideRead)

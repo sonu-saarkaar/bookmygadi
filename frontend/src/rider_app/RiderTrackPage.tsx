@@ -4,6 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { Navigation, MapPin, Search, Calendar, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+const getRideModeLabel = (ride: RiderActiveRide) => {
+  const urgency = String(ride.preference?.urgency_type || "").toLowerCase();
+  if (urgency === "reserve") return "Reserve Booking";
+  return "Instant Booking Active";
+};
+
 const RiderTrackPage = () => {
   const [rides, setRides] = useState<RiderActiveRide[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,18 +55,18 @@ const RiderTrackPage = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
-                onClick={() => navigate(`/rider/ride/${ride.id}`, { state: { ride } })}
+                onClick={() => navigate(`/rider/booking-accepted/${ride.booking_display_id || ride.id}`, { state: { ride } })}
                 className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform cursor-pointer tap-highlight-transparent relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-1 h-full bg-indigo-500"></div>
                 <div className="flex justify-between items-start mb-4">
                    <div className="flex flex-col">
                       <span className="text-[10px] font-bold px-2 py-1 bg-emerald-50 text-emerald-600 uppercase tracking-widest rounded-md w-fit mb-2">
-                        {ride.status}
+                        {getRideModeLabel(ride)}
                       </span>
                       <h3 className="font-bold text-gray-900 text-lg flex items-center gap-1">
                         <Calendar size={16} className="text-gray-400" />
-                        ID: #{ride.id}
+                        ID: {ride.booking_display_id || ride.id}
                       </h3>
                    </div>
                    <div className="p-2 rounded-full bg-gray-50 transition-colors">

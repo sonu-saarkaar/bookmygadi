@@ -42,6 +42,8 @@ RiderAuthType = RiderApiKey | EmbeddedDriverContext
 
 
 router = APIRouter(prefix="/rider", tags=["rider"])
+MAX_LOCATION_ACCURACY_METERS = 50.0
+MAX_SPEED_KMH = 180.0
 
 
 def _parse_flexible_datetime(raw: str | None) -> datetime | None:
@@ -64,6 +66,121 @@ def _parse_flexible_datetime(raw: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _distance_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
+    from math import atan2, cos, radians, sin, sqrt
+
+    r = 6371000.0
+    dlat = radians(b_lat - a_lat)
+    dlon = radians(b_lng - a_lng)
+    aa = sin(dlat / 2) ** 2 + cos(radians(a_lat)) * cos(radians(b_lat)) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(aa), sqrt(1 - aa))
+    return r * c
+
+
+def _validate_location_payload(ride: Ride, payload: LocationUpdate) -> tuple[float | None, datetime]:
+    accuracy = payload.accuracy
+    if accuracy is not None and accuracy > MAX_LOCATION_ACCURACY_METERS:
+        raise HTTPException(status_code=422, detail="Location accuracy too weak")
+
+    observed_at = payload.ts or datetime.utcnow()
+    if (
+        ride.driver_live_lat is not None
+        and ride.driver_live_lng is not None
+        and ride.driver_live_updated_at is not None
+        and observed_at <= ride.driver_live_updated_at
+    ):
+        raise HTTPException(status_code=409, detail="Out-of-order location update")
+
+    if (
+        ride.driver_live_lat is not None
+        and ride.driver_live_lng is not None
+        and ride.driver_live_updated_at is not None
+    ):
+        seconds = max((observed_at - ride.driver_live_updated_at).total_seconds(), 0.001)
+        distance_m = _distance_meters(ride.driver_live_lat, ride.driver_live_lng, payload.lat, payload.lng)
+        speed_kmh = (distance_m / seconds) * 3.6
+        if speed_kmh > MAX_SPEED_KMH:
+            raise HTTPException(status_code=422, detail="Location jump rejected")
+
+    return accuracy, observed_at
+
+
+def _tracking_payload(ride: Ride) -> RideTrackingRead:
+    return RideTrackingRead(
+        ride_id=ride.id,
+        status=ride.status,
+        pickup_location=ride.pickup_location,
+        destination=ride.destination,
+        driver_live_lat=ride.driver_live_lat,
+        driver_live_lng=ride.driver_live_lng,
+        driver_live_accuracy=ride.driver_live_accuracy,
+        driver_live_heading=ride.driver_live_heading,
+        driver_live_updated_at=ride.driver_live_updated_at,
+        customer_live_lat=ride.customer_live_lat,
+        customer_live_lng=ride.customer_live_lng,
+        customer_live_accuracy=ride.customer_live_accuracy,
+        customer_live_heading=ride.customer_live_heading,
+        customer_live_updated_at=ride.customer_live_updated_at,
+        pickup_lat=ride.pickup_lat,
+        pickup_lng=ride.pickup_lng,
+        destination_lat=ride.destination_lat,
+        destination_lng=ride.destination_lng,
+    )
+
+
+def _rider_request_payload(db: Session, ride: Ride) -> RiderRideRequest:
+    latest = (
+        db.query(RideNegotiation)
+        .filter(RideNegotiation.ride_id == ride.id)
+        .order_by(RideNegotiation.created_at.desc())
+        .first()
+    )
+    return RiderRideRequest(
+        id=ride.id,
+        booking_display_id=ride.booking_display_id,
+        pickup_location=ride.pickup_location,
+        destination=ride.destination,
+        vehicle_type=ride.vehicle_type,
+        status=ride.status,
+        estimated_fare_min=ride.estimated_fare_min,
+        estimated_fare_max=ride.estimated_fare_max,
+        agreed_fare=ride.agreed_fare,
+        requested_fare=ride.requested_fare,
+        latest_offer_amount=latest.amount if latest else None,
+        latest_offer_by=latest.offered_by if latest else None,
+        latest_offer_status=latest.status if latest else None,
+        accepted_at=ride.accepted_at,
+        arrived_at=ride.arrived_at,
+        started_at=ride.started_at,
+        completed_at=ride.completed_at,
+        created_at=ride.created_at,
+    )
+
+
+def _active_ride_payload(db: Session, ride: Ride) -> RiderActiveRideRead:
+    customer = db.get(User, ride.customer_id)
+    return RiderActiveRideRead(
+        id=ride.id,
+        booking_display_id=ride.booking_display_id,
+        pickup_location=ride.pickup_location,
+        destination=ride.destination,
+        vehicle_type=ride.vehicle_type,
+        status=ride.status,
+        payment_status=ride.payment_status,
+        agreed_fare=ride.agreed_fare,
+        estimated_fare_min=ride.estimated_fare_min,
+        estimated_fare_max=ride.estimated_fare_max,
+        customer_name=customer.name if customer else None,
+        customer_phone=customer.phone if customer else None,
+        accepted_at=ride.accepted_at,
+        arrived_at=ride.arrived_at,
+        started_at=ride.started_at,
+        completed_at=ride.completed_at,
+        preference=ride.preference,
+        created_at=ride.created_at,
+    )
 
 
 def _reserve_window(ride: Ride) -> tuple[datetime, datetime] | None:
@@ -204,6 +321,7 @@ def list_rider_requests(
         out.append(
             RiderRideRequest(
                 id=row.id,
+                booking_display_id=row.booking_display_id,
                 pickup_location=row.pickup_location,
                 destination=row.destination,
                 vehicle_type=row.vehicle_type,
@@ -322,6 +440,7 @@ def list_active_rides(
 
     rows = (
         db.query(Ride)
+        .options(selectinload(Ride.preference))
         .filter(
             Ride.driver_id == api_key.driver_id,
             Ride.status.in_(["accepted", "arriving", "in_progress"]),
@@ -331,21 +450,7 @@ def list_active_rides(
     )
     out: list[RiderActiveRideRead] = []
     for row in rows:
-        customer = db.get(User, row.customer_id)
-        out.append(
-            RiderActiveRideRead(
-                id=row.id,
-                pickup_location=row.pickup_location,
-                destination=row.destination,
-                vehicle_type=row.vehicle_type,
-                status=row.status,                payment_status=row.payment_status,                agreed_fare=row.agreed_fare,
-                estimated_fare_min=row.estimated_fare_min,
-                estimated_fare_max=row.estimated_fare_max,
-                customer_name=customer.name if customer else None,
-                customer_phone=customer.phone if customer else None,
-                created_at=row.created_at,
-            )
-        )
+        out.append(_active_ride_payload(db, row))
     return out
 
 
@@ -361,6 +466,8 @@ async def accept_rider_request(
         raise HTTPException(status_code=404, detail="Ride not found")
     if ride.status != "pending":
         raise HTTPException(status_code=409, detail=f"Ride already {ride.status}")
+    if not api_key.driver_id:
+        raise HTTPException(status_code=403, detail="Driver account not linked. Please login again.")
     if api_key.driver_id:
         active_ride = (
             db.query(Ride)
@@ -397,14 +504,23 @@ async def accept_rider_request(
                 raise HTTPException(status_code=409, detail="Overlapping reserve booking not allowed for this driver")
 
     ride.status = "accepted"
-    if api_key.driver_id:
-        ride.driver_id = api_key.driver_id
+    ride.driver_id = api_key.driver_id
+    ride.accepted_at = datetime.utcnow()
     if payload.agreed_fare is not None:
         ride.agreed_fare = payload.agreed_fare
 
     db.commit()
     db.refresh(ride)
-    await realtime_manager.broadcast(ride.id, {"event": "ride_status_updated", "ride": RiderRideRequest.model_validate(ride).model_dump(mode="json")})
+    response_payload = _rider_request_payload(db, ride)
+
+    try:
+        await realtime_manager.broadcast(
+            ride.id,
+            {"event": "ride_status_updated", "ride": response_payload.model_dump(mode="json")},
+        )
+    except Exception:
+        # Acceptance must not fail if realtime fan-out is temporarily unavailable.
+        pass
     
     # ── Push Notification ─────────────────────────────────────────
     # Send push to the user that their ride got accepted
@@ -413,10 +529,13 @@ async def accept_rider_request(
     if customer and customer.fcm_token:
         driver = db.get(User, ride.driver_id)
         driver_name = driver.name if driver else "Your driver"
-        await notify_ride_accepted(customer.fcm_token, driver_name)
+        try:
+            await notify_ride_accepted(customer.fcm_token, driver_name)
+        except Exception:
+            pass
     # ──────────────────────────────────────────────────────────────
 
-    return ride
+    return response_payload
 
 
 @router.post("/requests/{ride_id}/reject", response_model=RiderRideRequest)
@@ -525,30 +644,31 @@ async def update_active_ride_status(
         if (ride.start_otp or "") != payload.start_otp:
             raise HTTPException(status_code=400, detail="Invalid ride OTP")
 
+    now = datetime.utcnow()
+    if payload.status == "arriving" and ride.arrived_at is None:
+        ride.arrived_at = now
+    elif payload.status == "in_progress" and ride.started_at is None:
+        ride.started_at = now
+    elif payload.status == "completed":
+        if ride.started_at is None:
+            ride.started_at = now
+        ride.completed_at = now
+
     ride.status = payload.status
 
     db.commit()
     db.refresh(ride)
-    await realtime_manager.broadcast(
-        ride.id,
-        {
-            "event": "ride_status_updated",
-            "ride": {
-                "id": ride.id,
-                "customer_id": ride.customer_id,
-                "driver_id": ride.driver_id,
-                "pickup_location": ride.pickup_location,
-                "destination": ride.destination,
-                "vehicle_type": ride.vehicle_type,
-                "status": ride.status,
-                "estimated_fare_min": ride.estimated_fare_min,
-                "estimated_fare_max": ride.estimated_fare_max,
-                "agreed_fare": ride.agreed_fare,
-                "created_at": ride.created_at.isoformat(),
-                "updated_at": ride.updated_at.isoformat(),
+    response_payload = _active_ride_payload(db, ride)
+    try:
+        await realtime_manager.broadcast(
+            ride.id,
+            {
+                "event": "ride_status_updated",
+                "ride": response_payload.model_dump(mode="json"),
             },
-        },
-    )
+        )
+    except Exception:
+        pass
 
     # ── Push Notifications ────────────────────────────────────────────────
     customer = db.get(User, ride.customer_id)
@@ -556,28 +676,18 @@ async def update_active_ride_status(
     driver = db.get(User, ride.driver_id) if ride.driver_id else None
     driver_name = driver.name if driver else "Your driver"
 
-    if payload.status == "arriving":
-        await notify_driver_arriving(customer_fcm, driver_name)
-    elif payload.status == "in_progress":
-        await notify_ride_started(customer_fcm, ride.destination)
-    elif payload.status == "completed":
-        await notify_ride_completed(customer_fcm, float(ride.agreed_fare or 0))
+    try:
+        if payload.status == "arriving":
+            await notify_driver_arriving(customer_fcm, driver_name)
+        elif payload.status == "in_progress":
+            await notify_ride_started(customer_fcm, ride.destination)
+        elif payload.status == "completed":
+            await notify_ride_completed(customer_fcm, float(ride.agreed_fare or 0))
+    except Exception:
+        pass
     # ─────────────────────────────────────────────────────────────────────
 
-    return RiderActiveRideRead(
-        id=ride.id,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        vehicle_type=ride.vehicle_type,
-        status=ride.status,
-        payment_status=ride.payment_status,
-        agreed_fare=ride.agreed_fare,
-        estimated_fare_min=ride.estimated_fare_min,
-        estimated_fare_max=ride.estimated_fare_max,
-        customer_name=customer.name if customer else None,
-        customer_phone=customer.phone if customer else None,
-        created_at=ride.created_at,
-    )
+    return response_payload
 
 
 @router.post("/active/{ride_id}/driver-location")
@@ -595,8 +705,12 @@ async def update_driver_location(
     if ride.driver_id != api_key.driver_id:
         raise HTTPException(status_code=403, detail="This ride is not assigned to your driver account")
 
+    accuracy, observed_at = _validate_location_payload(ride, payload)
     ride.driver_live_lat = payload.lat
     ride.driver_live_lng = payload.lng
+    ride.driver_live_accuracy = accuracy
+    ride.driver_live_heading = payload.heading
+    ride.driver_live_updated_at = observed_at
     db.commit()
 
     # Broadcast instantly to all subscribers of this ride's WebSocket
@@ -606,13 +720,17 @@ async def update_driver_location(
         {
             "event": "location_update",
             "type": "location_update",
+            "actor": "driver",
             "lat": payload.lat,
             "lng": payload.lng,
+            "accuracy": accuracy,
+            "heading": payload.heading,
+            "ts": observed_at.isoformat(),
             "ride_id": ride_id,
         },
     )
 
-    return {"ok": True, "lat": payload.lat, "lng": payload.lng}
+    return {"ok": True, "lat": payload.lat, "lng": payload.lng, "accuracy": accuracy, "heading": payload.heading, "ts": observed_at.isoformat()}
 
 
 
@@ -689,20 +807,7 @@ def get_active_tracking(
     if ride.status != "pending" and ride.driver_id != api_key.driver_id:
         raise HTTPException(status_code=403, detail="This ride is not assigned to your driver account")
 
-    return RideTrackingRead(
-        ride_id=ride.id,
-        status=ride.status,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        driver_live_lat=ride.driver_live_lat,
-        driver_live_lng=ride.driver_live_lng,
-        customer_live_lat=ride.customer_live_lat,
-        customer_live_lng=ride.customer_live_lng,
-        pickup_lat=ride.pickup_lat,
-        pickup_lng=ride.pickup_lng,
-        destination_lat=ride.destination_lat,
-        destination_lng=ride.destination_lng,
-    )
+    return _tracking_payload(ride)
 
 
 @router.get("/active/{ride_id}/messages", response_model=list[RideMessageRead])

@@ -1,11 +1,12 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { authStore, backendApi, type Ride, type RideTracking, type RideMessage } from "@/services/backendApi";
 import { notifyEvent, playSound } from "@/services/notificationCenter";
 import { MapPin, Navigation, Phone, MessageSquare, ShieldAlert, CheckCircle2, Wallet, X, ChevronUp, ChevronDown, AlertTriangle, MessageCircle, User, Send, Menu } from "lucide-react";
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { LiveMap } from "@/components/LiveMap";
+import { formatBookingDateTime, formatBookingTimeOnly } from "@/utils/datetime";
 
 interface BookingState {
    rideId: string;
@@ -32,19 +33,15 @@ const distanceKm = (lat1?: number | null, lon1?: number | null, lat2?: number | 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c;
 };
 
-const formatScheduleDateTime = (value?: string | null) => {
-   const date = value ? new Date(value) : new Date();
-   if (Number.isNaN(date.getTime())) return "";
-   const dayPart = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-   const timePart = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
-   return `${dayPart} at ${timePart}`;
-};
-
 const BookingConfirmedPage = () => {
   const navigate = useNavigate(); const { state } = useLocation();
+  const { bookingId = "" } = useParams();
   const payloadFromRoute = state as BookingState | null; const payload = payloadFromRoute || readStoredBooking();
   const safePayload = payload || { rideId: "", pickup: "", destination: "", vehicleType: "", offerPrice: 0 };
+  const routeBookingId = decodeURIComponent(bookingId || "").trim();
+  const [resolvedRideId, setResolvedRideId] = useState(safePayload.rideId || "");
   const [ride, setRide] = useState<Ride | null>(null); const [tracking, setTracking] = useState<RideTracking | null>(null);
+  const effectiveRideId = resolvedRideId || safePayload.rideId || "";
   
   const fare = ride?.agreed_fare || ride?.estimated_fare_max || safePayload.offerPrice;
   const [notice, setNotice] = useState("");
@@ -60,10 +57,40 @@ const BookingConfirmedPage = () => {
    const sheetDragControls = useDragControls();
 
    useEffect(() => {
-     if (!safePayload.rideId) {
+     if (!safePayload.rideId && !routeBookingId) {
        navigate("/app/home", { replace: true });
      }
-   }, [safePayload.rideId, navigate]);
+   }, [safePayload.rideId, routeBookingId, navigate]);
+
+  useEffect(() => {
+    const token = localStorage.getItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY) || sessionStorage.getItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY) || authStore.getToken();
+    if (!token) return;
+    if (safePayload.rideId && !resolvedRideId) {
+      setResolvedRideId(safePayload.rideId);
+      return;
+    }
+    if (!routeBookingId || resolvedRideId) return;
+
+    backendApi.listRides(token).then((rows) => {
+      const found = rows.find((row) => row.booking_display_id === routeBookingId || row.id === routeBookingId);
+      if (!found) {
+        navigate("/app/home", { replace: true });
+        return;
+      }
+      setResolvedRideId(found.id);
+      setRide(found);
+      const nextPayload = {
+        rideId: found.id,
+        pickup: found.pickup_location,
+        destination: found.destination,
+        vehicleType: found.vehicle_type,
+        offerPrice: found.agreed_fare || found.estimated_fare_max || found.estimated_fare_min || safePayload.offerPrice || 0,
+        bookedAt: found.created_at,
+      };
+      localStorage.setItem(ACTIVE_BOOKING_STORAGE_KEY, JSON.stringify(nextPayload));
+      sessionStorage.setItem(ACTIVE_BOOKING_STORAGE_KEY, JSON.stringify(nextPayload));
+    }).catch(() => undefined);
+  }, [routeBookingId, resolvedRideId, safePayload.rideId, safePayload.offerPrice, navigate]);
 
   const handleDragEnd = (_: any, info: any) => {
     const offset = info.offset.y;
@@ -81,9 +108,7 @@ const BookingConfirmedPage = () => {
   const isRideStarted = rideStatus === "in_progress" || rideStatus === "completed"; 
   const isRideCompleted = rideStatus === "completed";
    const riderId = ride?.driver_id ? `R${ride.driver_id.slice(-4).toUpperCase()}` : `R0${safePayload.rideId.slice(-2)}`;
-   const scheduledLabel = formatScheduleDateTime(
-      ride?.preference?.pickup_datetime || ride?.created_at || safePayload.bookedAt,
-   );
+   const bookedAtLabel = formatBookingDateTime(ride?.created_at || safePayload.bookedAt);
    
    // Fallback to preference if driver's actual vehicle details are not available yet
    const modelLabel = ride?.driver_vehicle_details?.model || ride?.preference?.vehicle_model || ride?.vehicle_type || safePayload.vehicleType;
@@ -114,13 +139,8 @@ const BookingConfirmedPage = () => {
   const isAdvancePaid = ride?.preference?.advance_payment_status === "paid";
 
   const formatTime = (isoString?: string | null) => {
-    if (!isoString) return "";
-    const h = new Date(isoString).getHours();
-    const m = new Date(isoString).getMinutes();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const hr = h % 12 || 12;
-    return `${hr}:${m.toString().padStart(2, '0')} ${ampm}`;
-  };
+     return formatBookingTimeOnly(isoString);
+   };
 
   const steps = [
     { label: "Request", short: "Searching", time: formatTime(ride?.created_at) },
@@ -131,14 +151,14 @@ const BookingConfirmedPage = () => {
   ];
 
    useEffect(() => {
-      if (!safePayload.rideId) { navigate("/app/home", { replace: true }); return; }
+      if (!effectiveRideId) { navigate("/app/home", { replace: true }); return; }
       const token = localStorage.getItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY) || sessionStorage.getItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY) || authStore.getToken();
       if (!token) return;
     const load = async () => {
       try {
             const [found, track] = await Promise.all([
-               backendApi.getRide(safePayload.rideId, token),
-               backendApi.getRideTracking(safePayload.rideId, token).catch(() => null),
+               backendApi.getRide(effectiveRideId, token),
+               backendApi.getRideTracking(effectiveRideId, token).catch(() => null),
             ]);
             if (found) setRide(found);
             if (track) setTracking(track);
@@ -147,7 +167,7 @@ const BookingConfirmedPage = () => {
       load();
 
       let ws: WebSocket | null = null;
-      const wsUrl = backendApi.rideWebsocketUrl(safePayload.rideId);
+      const wsUrl = backendApi.rideWebsocketUrl(effectiveRideId);
       if (wsUrl) {
          try {
             ws = new WebSocket(wsUrl);
@@ -159,7 +179,7 @@ const BookingConfirmedPage = () => {
                   } else if (data.event === "chat_message_created" && data.message) {
                      setMessages(m => [...m, data.message]);
                      if (data.message.sender_type !== "customer") {
-                        notifyEvent({ event: "searching", title: "New Message", body: "Driver sent a message", tag: `chat-${safePayload.rideId}` }).catch(() => undefined);
+                        notifyEvent({ event: "searching", title: "New Message", body: "Driver sent a message", tag: `chat-${effectiveRideId}` }).catch(() => undefined);
                         if (!showChat) setNotice("New message from Driver");
                      }
                   }
@@ -174,7 +194,7 @@ const BookingConfirmedPage = () => {
 
       const loadChat = async () => {
         try {
-          const msgs = await backendApi.getRideMessages(safePayload.rideId, token);
+          const msgs = await backendApi.getRideMessages(effectiveRideId, token);
           setMessages(msgs);
         } catch { }
       };
@@ -183,7 +203,7 @@ const BookingConfirmedPage = () => {
     // Also poll overall ride status. E.g. what happens if a ride is marked 'completed' while in this view?
     const checkCompletion = async () => {
        try {
-          const r = await backendApi.getRide(safePayload.rideId, token);
+          const r = await backendApi.getRide(effectiveRideId, token);
                if (r.status === 'completed' || r.status === 'cancelled') {
              localStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);
              sessionStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);
@@ -192,7 +212,7 @@ const BookingConfirmedPage = () => {
                       if (r.status === 'cancelled') {
                          navigate('/app/booking-cancelled', { replace: true, state: { ...safePayload, status: 'cancelled', reason: 'Ride cancelled' } });
                       } else {
-                         navigate(`/app/payment/${safePayload.rideId}`, { replace: true, state: { rideId: safePayload.rideId } });
+                         navigate(`/app/payment/${effectiveRideId}`, { replace: true, state: { rideId: effectiveRideId } });
                       }
           }
        } catch {}
@@ -207,10 +227,10 @@ const BookingConfirmedPage = () => {
          window.clearInterval(id);
          ws?.close();
       };
-   }, [navigate, safePayload.rideId, showChat]);
+   }, [navigate, effectiveRideId, showChat]);
 
    useEffect(() => {
-      if (!ride || !safePayload.rideId || terminalNavigationRef.current) return;
+      if (!ride || !effectiveRideId || terminalNavigationRef.current) return;
 
       if (rideStatus === "cancelled" || rideStatus === "canceled") {
          terminalNavigationRef.current = true;
@@ -238,12 +258,12 @@ const BookingConfirmedPage = () => {
          sessionStorage.removeItem(ACTIVE_BOOKING_STORAGE_KEY);
          localStorage.removeItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY);
          sessionStorage.removeItem(ACTIVE_BOOKING_TOKEN_STORAGE_KEY);
-         navigate(`/app/payment/${safePayload.rideId}`, { replace: true, state: { rideId: safePayload.rideId } });
+         navigate(`/app/payment/${effectiveRideId}`, { replace: true, state: { rideId: effectiveRideId } });
       }
-   }, [ride, rideStatus, safePayload, navigate]);
+   }, [ride, rideStatus, safePayload, effectiveRideId, navigate]);
 
    useEffect(() => {
-      if (!safePayload.rideId || rideStatus === "cancelled" || rideStatus === "completed") return;
+      if (!effectiveRideId || rideStatus === "cancelled" || rideStatus === "completed") return;
 
       let watchId: number | null = null;
       let nativeInterval: number | null = null;
@@ -268,7 +288,7 @@ const BookingConfirmedPage = () => {
                   }
                : prev,
          );
-         backendApi.updateCustomerLocation(safePayload.rideId, lat, lng, token).catch(() => undefined);
+         backendApi.updateCustomerLocation(effectiveRideId, lat, lng, token).catch(() => undefined);
          lastSentAt = now;
       };
 
@@ -304,7 +324,7 @@ const BookingConfirmedPage = () => {
          if (watchId != null) navigator.geolocation.clearWatch(watchId);
          if (nativeInterval != null) window.clearInterval(nativeInterval);
       };
-   }, [safePayload.rideId, rideStatus]);
+   }, [effectiveRideId, rideStatus]);
 
    const sendMessage = async () => {
       if (!chatText.trim() || !safePayload.rideId) return;
@@ -375,7 +395,7 @@ const BookingConfirmedPage = () => {
          if (token && safePayload.rideId) {
             await backendApi.createRideSupportTicket(safePayload.rideId, {
                issue_type: "sos_emergency",
-               title: `🚨 CRITICAL SOS: CUSTOMER · BMG${safePayload.rideId.slice(-6).toUpperCase()}`,
+               title: `🚨 CRITICAL SOS: CUSTOMER · ${ride?.booking_display_id || safePayload.rideId}`,
                description: `EMERGENCY SOS triggered by CUSTOMER. Please immediately trace Live Location: Lat ${liveLat}, Lng ${liveLng}. Alert their emergency contacts. Current Status: ${rideStatus}. Mobile Data Received.`,
                severity: "critical",
                source_panel: "user"
@@ -409,7 +429,7 @@ const BookingConfirmedPage = () => {
             safePayload.rideId,
             {
                issue_type: "complaint",
-               title: `Complaint Regarding Ride · BMG${safePayload.rideId.slice(-6).toUpperCase()}`,
+               title: `Complaint Regarding Ride · ${ride?.booking_display_id || safePayload.rideId}`,
                description: `Auto complaint registered from user panel. Selected complaint buckets: ${complaintSummary}.`,
                severity: "high",
                source_panel: "user",
@@ -549,7 +569,7 @@ const BookingConfirmedPage = () => {
                         </div>
                         <div className="text-right">
                            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Booking ID</p>
-                           <p className="text-sm font-black text-blue-900">BMG{safePayload.rideId.slice(-6).toUpperCase()}</p>
+                           <p className="text-sm font-black text-blue-900">{ride?.booking_display_id || safePayload.rideId}</p>
                         </div>
                      </div>
                      <div className="bg-emerald-500 text-white py-2 rounded-xl text-center font-black text-xs">Booking Confirmed</div>
@@ -604,7 +624,7 @@ const BookingConfirmedPage = () => {
                      <span>{etaMins != null ? `${etaMins} mins` : "-"}</span>
                      <span className="text-emerald-600">₹{new Intl.NumberFormat("en-IN").format(fare)}</span>
                   </div>
-                  <p className="mt-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider text-center">{scheduledLabel}</p>
+                  <p className="mt-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider text-center">{bookedAtLabel}</p>
                </div>
 
                {ride?.preference?.urgency_type === "reserve" && !isAdvancePaid && (

@@ -141,6 +141,7 @@ class RideRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    booking_display_id: str
     customer_id: str
     driver_id: str | None = None
     driver_name: str | None = None
@@ -280,6 +281,9 @@ class RiderActiveStatusUpdate(BaseModel):
 class LocationUpdate(BaseModel):
     lat: float
     lng: float
+    accuracy: float | None = Field(default=None, ge=0)
+    heading: float | None = None
+    ts: datetime | None = None
 
 
 class RideTrackingRead(BaseModel):
@@ -289,8 +293,14 @@ class RideTrackingRead(BaseModel):
     destination: str
     driver_live_lat: float | None = None
     driver_live_lng: float | None = None
+    driver_live_accuracy: float | None = None
+    driver_live_heading: float | None = None
+    driver_live_updated_at: datetime | None = None
     customer_live_lat: float | None = None
     customer_live_lng: float | None = None
+    customer_live_accuracy: float | None = None
+    customer_live_heading: float | None = None
+    customer_live_updated_at: datetime | None = None
     pickup_lat: float | None = None
     pickup_lng: float | None = None
     destination_lat: float | None = None
@@ -325,6 +335,7 @@ class RiderRideRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    booking_display_id: str
     pickup_location: str
     destination: str
     vehicle_type: str
@@ -345,6 +356,7 @@ class RiderRideRequest(BaseModel):
 
 class RiderActiveRideRead(BaseModel):
     id: str
+    booking_display_id: str
     pickup_location: str
     destination: str
     vehicle_type: str
@@ -359,6 +371,7 @@ class RiderActiveRideRead(BaseModel):
     arrived_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    preference: RidePreferenceRead | None = None
     created_at: datetime
 
 

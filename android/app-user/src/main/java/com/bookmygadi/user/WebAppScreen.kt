@@ -24,6 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 
 private const val TAG = "BmgUserWebView"
 private const val WEBVIEW_RESIZE_JS =
@@ -44,7 +47,9 @@ private fun triggerMapReflow(webView: WebView?) {
 
 class WebAppInterface(
     private val context: Context,
-    private val getLatestLocation: () -> Location?
+    private val getLatestLocation: () -> Location?,
+    private val getLatestLocationAgeMs: () -> Long?,
+    private val requestFreshLocation: () -> Unit,
 ) {
     @JavascriptInterface
     fun getNativeLocation(): String {
@@ -54,6 +59,16 @@ class WebAppInterface(
         } else {
             "null"
         }
+    }
+
+    @JavascriptInterface
+    fun getNativeLocationAgeMs(): String {
+        return getLatestLocationAgeMs()?.toString() ?: "null"
+    }
+
+    @JavascriptInterface
+    fun requestFreshLocation() {
+        requestFreshLocation.invoke()
     }
 
     @JavascriptInterface
@@ -111,16 +126,39 @@ class WebAppInterface(
 fun WebAppScreen(
     url: String,
     onMainFrameLoadError: ((String?) -> Unit)? = null,
+    reloadKey: Int = 0,
 ) {
     val context = LocalContext.current
 
     val locationManager = remember { context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
     val latestLocation = remember { mutableStateOf<Location?>(null) }
+    val latestLocationTimeMs = remember { mutableStateOf<Long?>(null) }
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
     DisposableEffect(context) {
+        fun applyLocation(location: Location?) {
+            if (location == null) return
+            latestLocation.value = location
+            latestLocationTimeMs.value =
+                if (location.time > 0L) location.time else System.currentTimeMillis()
+        }
+
+        fun requestFreshLocationFix() {
+            try {
+                val cancellationTokenSource = CancellationTokenSource()
+                fusedLocationClient
+                    .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cancellationTokenSource.token)
+                    .addOnSuccessListener { location -> applyLocation(location) }
+            } catch (_: SecurityException) {
+                // Permissions not yet granted.
+            } catch (_: Exception) {
+                // Ignore fused provider issues and continue with LocationManager updates.
+            }
+        }
+
         val locationListener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                latestLocation.value = location
+                applyLocation(location)
             }
 
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -131,10 +169,11 @@ fun WebAppScreen(
         try {
             val gpsLoc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
             val netLoc = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            latestLocation.value = gpsLoc ?: netLoc
+            applyLocation(gpsLoc ?: netLoc)
 
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 1f, locationListener)
             locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 5f, locationListener)
+            requestFreshLocationFix()
         } catch (_: SecurityException) {
             // Permissions not yet granted.
         } catch (_: Exception) {
@@ -194,7 +233,34 @@ fun WebAppScreen(
                 }
 
                 addJavascriptInterface(
-                    WebAppInterface(context = ctx, getLatestLocation = { latestLocation.value }),
+                    WebAppInterface(
+                        context = ctx,
+                        getLatestLocation = { latestLocation.value },
+                        getLatestLocationAgeMs = {
+                            latestLocationTimeMs.value?.let { System.currentTimeMillis() - it }
+                        },
+                        requestFreshLocation = {
+                            try {
+                                val cancellationTokenSource = CancellationTokenSource()
+                                fusedLocationClient
+                                    .getCurrentLocation(
+                                        Priority.PRIORITY_HIGH_ACCURACY,
+                                        cancellationTokenSource.token
+                                    )
+                                    .addOnSuccessListener { location ->
+                                        if (location != null) {
+                                            latestLocation.value = location
+                                            latestLocationTimeMs.value =
+                                                if (location.time > 0L) location.time else System.currentTimeMillis()
+                                        }
+                                    }
+                            } catch (_: SecurityException) {
+                                // Permissions not yet granted.
+                            } catch (_: Exception) {
+                                // Ignore refresh failures.
+                            }
+                        },
+                    ),
                     "AndroidInterface"
                 )
 
@@ -230,9 +296,8 @@ fun WebAppScreen(
                     ) {
                         super.onReceivedError(view, request, error)
                         Log.e(TAG, "WebError: ${error?.description} (${error?.errorCode})")
-                        // Only report fatal errors that aren't just "not found" or similar transient ones
-                        if (request?.isForMainFrame == true && error?.errorCode == WebViewClient.ERROR_CONNECT) {
-                            onMainFrameLoadError?.invoke(error.description?.toString())
+                        if (request?.isForMainFrame == true) {
+                            onMainFrameLoadError?.invoke(error?.description?.toString())
                         }
                     }
 
@@ -253,7 +318,7 @@ fun WebAppScreen(
                         detail: android.webkit.RenderProcessGoneDetail?
                     ): Boolean {
                         Log.e(TAG, "WebView renderer gone. didCrash=${detail?.didCrash()}")
-                        // Try to reload current URL instead of base URL
+                        onMainFrameLoadError?.invoke("WebView renderer stopped")
                         view?.reload()
                         return true
                     }
@@ -263,8 +328,11 @@ fun WebAppScreen(
             }
         },
         update = { webView ->
-            // Removed the aggressive loadUrl check that was causing reloads on every GPS update.
-            // The initial load is handled in the factory block.
+            if (webView.tag != reloadKey) {
+                webView.tag = reloadKey
+                webView.loadUrl(url)
+                return@AndroidView
+            }
             triggerMapReflow(webView)
         }
     )

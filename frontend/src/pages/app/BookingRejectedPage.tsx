@@ -42,10 +42,6 @@ const BookingRejectedPage = () => {
             We couldn't confirm this ride at the moment. All riders might be busy or offline.
          </p>
 
-         <div className="inline-flex rounded-full bg-amber-50 text-amber-600 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest mb-10 border border-amber-100">
-           Status: {payload?.status || "Rejected"}
-         </div>
-
          <div className="w-full bg-white rounded-3xl p-5 shadow-soft border border-gray-100 mb-8">
             <div className="flex justify-between items-center mb-3">
                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Request Snapshot</span>

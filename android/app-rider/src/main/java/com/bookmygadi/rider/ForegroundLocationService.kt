@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import java.time.Instant
 import com.bookmygadi.core.network.BookMyGadiApi
 import com.bookmygadi.core.network.LocationUpdateRequest
 import com.bookmygadi.core.network.WebSocketManager
@@ -81,17 +82,54 @@ class ForegroundLocationService : Service() {
 
     // Whether we managed to open a WebSocket (true = real-time, false = REST fallback)
     private var useWebSocket = false
+    private var lastAcceptedLat: Double? = null
+    private var lastAcceptedLng: Double? = null
+    private var lastAcceptedAtMs: Long = 0L
+
+    private fun distanceMeters(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
+        val result = FloatArray(1)
+        android.location.Location.distanceBetween(aLat, aLng, bLat, bLng, result)
+        return result[0].toDouble()
+    }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
             val lat = loc.latitude
             val lng = loc.longitude
-            Log.d(TAG, "Location: $lat, $lng  ws=$useWebSocket")
+            val accuracy = if (loc.hasAccuracy()) loc.accuracy else null
+            val heading = if (loc.hasBearing()) loc.bearing else null
+            val now = System.currentTimeMillis()
+
+            if (accuracy != null && accuracy > 35f) {
+                Log.w(TAG, "Skipping weak GPS fix accuracy=$accuracy")
+                return
+            }
+
+            val prevLat = lastAcceptedLat
+            val prevLng = lastAcceptedLng
+            if (prevLat != null && prevLng != null) {
+                val movedMeters = distanceMeters(prevLat, prevLng, lat, lng)
+                if (movedMeters < 6.0 && now - lastAcceptedAtMs < 1500L) {
+                    return
+                }
+            }
+
+            lastAcceptedLat = lat
+            lastAcceptedLng = lng
+            lastAcceptedAtMs = now
+            Log.d(TAG, "Location: $lat, $lng acc=${accuracy ?: -1f} ws=$useWebSocket")
 
             if (useWebSocket && webSocketManager.isConnected) {
                 // Fast path — send over WebSocket (zero REST overhead)
-                webSocketManager.sendLocation(rideId, lat, lng)
+                webSocketManager.sendLocation(
+                    rideId = rideId,
+                    lat = lat,
+                    lng = lng,
+                    accuracy = accuracy,
+                    heading = heading,
+                    ts = Instant.ofEpochMilli(now).toString(),
+                )
             } else {
                 // Fallback — REST POST to /rider/active/{rideId}/driver-location
                 serviceScope.launch {
@@ -99,7 +137,13 @@ class ForegroundLocationService : Service() {
                         api.updateRiderLocation(
                             rideId = rideId,
                             token = "Bearer $token",
-                            request = LocationUpdateRequest(lat, lng)
+                            request = LocationUpdateRequest(
+                                lat = lat,
+                                lng = lng,
+                                accuracy = accuracy,
+                                heading = heading,
+                                ts = Instant.ofEpochMilli(now).toString(),
+                            )
                         )
                     } catch (e: Exception) {
                         Log.w(TAG, "REST location push failed: ${e.message}")
@@ -144,7 +188,7 @@ class ForegroundLocationService : Service() {
             2_000L
         )
             .setMinUpdateIntervalMillis(1_000L)
-            .setMaxUpdateDelayMillis(4_000L)
+            .setMaxUpdateDelayMillis(3_000L)
             .build()
 
         fusedClient.requestLocationUpdates(

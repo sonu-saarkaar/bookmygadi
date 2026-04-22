@@ -4,6 +4,7 @@ import com.bookmygadi.rider.R
 
 import android.annotation.SuppressLint
 import android.Manifest
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.os.Bundle
@@ -25,6 +26,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
+import android.net.Uri
+import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.util.Log
 import androidx.core.app.ActivityCompat
@@ -38,6 +41,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 2001
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2002
+        private const val BACKGROUND_LOCATION_REQUEST_CODE = 2003
         private const val TAG = "BmgRiderWebView"
         private const val WEBVIEW_RESIZE_JS =
             "window.dispatchEvent(new Event('resize'));window.dispatchEvent(new Event('orientationchange'));"
@@ -144,7 +149,7 @@ class MainActivity : ComponentActivity() {
             registerReceiver(nativeActionReceiver, filter)
         }
 
-        ensureLocationPermission()
+        ensureRequiredPermissions()
 
         val root = FrameLayout(this)
         root.layoutParams = ViewGroup.LayoutParams(
@@ -299,15 +304,56 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun ensureLocationPermission() {
+    private fun openAppSettings() {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+        )
+    }
+
+    private fun showMandatoryPermissionDialog(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
+            .show()
+    }
+
+    private fun ensureRequiredPermissions() {
         val fineGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarseGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val notificationGranted =
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
         if (!fineGranted && !coarseGranted) {
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
                 LOCATION_PERMISSION_REQUEST_CODE
+            )
+            return
+        }
+
+        if (!notificationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST_CODE
+            )
+            return
+        }
+
+        if (
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                BACKGROUND_LOCATION_REQUEST_CODE
             )
         }
     }
@@ -317,6 +363,28 @@ class MainActivity : ComponentActivity() {
         if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 startLocationUpdates()
+                ensureRequiredPermissions()
+            } else {
+                showMandatoryPermissionDialog(
+                    "Location Required",
+                    "BookMyGadi Rider needs precise location access for live ride alerts and tracking.",
+                )
+            }
+        } else if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isEmpty() || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                showMandatoryPermissionDialog(
+                    "Notifications Required",
+                    "Enable notifications so incoming rides can appear instantly, even when the app is closed.",
+                )
+            } else {
+                ensureRequiredPermissions()
+            }
+        } else if (requestCode == BACKGROUND_LOCATION_REQUEST_CODE) {
+            if (grantResults.isEmpty() || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                showMandatoryPermissionDialog(
+                    "Background Location Required",
+                    "Allow background location so ride tracking keeps working while the rider app is minimized.",
+                )
             }
         }
     }

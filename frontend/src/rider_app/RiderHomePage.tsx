@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { riderApi, type RiderActiveRide, type RiderRequest } from "@/services/riderApi";
 import { backendApi, authStore } from "@/services/backendApi";
-import { reverseGeocodeWithGoogle } from "@/services/googleMaps";
+import { formatPreciseReverseAddress, reverseGeocodeWithGoogle } from "@/services/googleMaps";
 import { useNavigate } from "react-router-dom";
 import { notifyEvent, playSound, stopAlarm } from "@/services/notificationCenter";
 import { motion, AnimatePresence } from "framer-motion";
@@ -27,6 +27,7 @@ const RiderHomePage = () => {
   const [riderLocation, setRiderLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [riderLocationLabel, setRiderLocationLabel] = useState("");
   const [locationError, setLocationError] = useState("");
+  const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const lastRequestCountRef = useRef(0);
 
   const [riderProfileData, setRiderProfileData] = useState<{ name: string; avatar: string | null; scale: number; x: number; y: number }>({ name: "Driver", avatar: null, scale: 1, x: 0, y: 0 });
@@ -196,11 +197,12 @@ const RiderHomePage = () => {
         );
         if (!response.ok) return;
         const data = await response.json();
-        const address = data?.address || {};
-        const label = address.suburb || address.neighbourhood || address.city_district || address.city || address.town || address.village || data?.display_name || "";
-        setRiderLocationLabel(String(label));
+        const label = formatPreciseReverseAddress(data, riderLocation.lat, riderLocation.lng);
+        if (label) setRiderLocationLabel(String(label));
       } catch {
         // Keep coordinate fallback on network/geocode failure.
+      } finally {
+        setIsRefreshingLocation(false);
       }
     };
 
@@ -208,14 +210,63 @@ const RiderHomePage = () => {
     return () => controller.abort();
   }, [riderLocation?.lat, riderLocation?.lng]);
 
+  const refreshRiderLocation = () => {
+    setIsRefreshingLocation(true);
+    setLocationError("");
+    setRiderLocationLabel("");
+
+    const applyCoords = (lat: number, lng: number) => {
+      setRiderLocation({ lat, lng });
+      setIsRefreshingLocation(false);
+    };
+
+    if ((window as any).AndroidInterface && typeof (window as any).AndroidInterface.getNativeLocation === "function") {
+      try {
+        const locStr = (window as any).AndroidInterface.getNativeLocation();
+        if (locStr && locStr !== "null") {
+          const { lat, lng } = JSON.parse(locStr);
+          applyCoords(lat, lng);
+          return;
+        }
+      } catch {
+        // Fall back to browser geolocation.
+      }
+    }
+
+    if (!navigator.geolocation) {
+      setLocationError("Location service unavailable");
+      setIsRefreshingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        applyCoords(position.coords.latitude, position.coords.longitude);
+      },
+      () => {
+        setLocationError("Unable to refresh live location");
+        setIsRefreshingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 12000,
+      },
+    );
+  };
+
   const onAccept = async (rideId: string, agreedFare?: number | null) => {
     setLoading(true);
     try {
       stopAlarm();
-      await riderApi.acceptRequest(rideId, agreedFare ?? undefined);
+      const acceptedRide = await riderApi.acceptRequest(rideId, agreedFare ?? undefined);
       playSound("confirmation");
-        const ridePayload = requests.find(r => r.id === rideId);
-        navigate(`/rider/ride/${rideId}`, { state: { ride: ridePayload } });
+      setNotice("Ride accepted successfully.");
+      await loadRequests();
+      navigate(`/rider/booking-accepted/${acceptedRide.booking_display_id || rideId}`, { state: { ride: acceptedRide } });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Ride accept failed");
+      setTimeout(() => setNotice(""), 3000);
     } finally {
       setLoading(false);
     }
@@ -282,20 +333,23 @@ const RiderHomePage = () => {
         </motion.div>
 
         <div className="flex-1 mx-3 min-w-0">
-          <div className="h-12 rounded-full bg-white border border-gray-100 shadow-soft flex items-center px-3 gap-2">
+          <div
+            className="h-12 rounded-full bg-white border border-gray-100 shadow-soft flex items-center px-3 gap-2 cursor-pointer active:opacity-80"
+            onClick={refreshRiderLocation}
+          >
             <div className={`w-7 h-7 rounded-full flex items-center justify-center ${locationError ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-600"}`}>
               <LocateFixed size={14} />
             </div>
             <div className="min-w-0">
               <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Rider Location</p>
-              <p className="text-[11px] font-black text-gray-800 truncate">
+              <p className={`text-[11px] font-black text-gray-800 truncate ${isRefreshingLocation ? "animate-pulse" : ""}`}>
                 {locationError
                   ? locationError
                   : riderLocation
                     ? riderLocationLabel
-                      ? `${riderLocationLabel} (${riderLocation.lat.toFixed(5)}, ${riderLocation.lng.toFixed(5)})`
-                      : `${riderLocation.lat.toFixed(5)}, ${riderLocation.lng.toFixed(5)}`
-                    : "Detecting location..."}
+                      ? riderLocationLabel
+                      : "Fetching exact location..."
+                    : isRefreshingLocation ? "Fetching live location..." : "Detecting location..."}
               </p>
             </div>
           </div>
@@ -404,7 +458,7 @@ const RiderHomePage = () => {
               key={ride.id}
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white rounded-[24px] shadow-soft border border-gray-100 overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
-              onClick={() => navigate(`/rider/ride/${ride.id}`, { state: { ride } })}
+              onClick={() => navigate(`/rider/booking-accepted/${ride.booking_display_id || ride.id}`, { state: { ride } })}
             >
               <div className="px-5 py-4 border-b border-gray-50 flex justify-between items-start">
                  <div>

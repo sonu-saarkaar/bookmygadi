@@ -260,7 +260,7 @@ const RiderEarningPage = () => {
                       <div className="h-8 w-8 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
                         <Zap size={16} fill="currentColor" />
                       </div>
-                      <span className="text-xs font-black uppercase tracking-widest text-slate-900">{r.status}</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-900">Ride Active</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
                       <Calendar size={12} />

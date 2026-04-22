@@ -14,11 +14,14 @@ android {
     val serverIp = props.getProperty("SERVER_IP", "10.0.2.2")
     val backendPort = props.getProperty("BACKEND_PORT", "8000")
     val frontendPort = props.getProperty("FRONTEND_PORT", "5173")
-    val devApiOrigin = props.getProperty("DEV_API_ORIGIN", "http://$serverIp:$backendPort")
-    val devWsOrigin = props.getProperty("DEV_WS_ORIGIN", "ws://$serverIp:$backendPort")
-    val devWebOrigin = props.getProperty("DEV_WEB_ORIGIN", "http://$serverIp:$frontendPort")
     val prodApiOrigin = props.getProperty("PROD_API_ORIGIN", "https://api.bookmygadi.app")
     val prodWebOrigin = props.getProperty("PROD_WEB_ORIGIN", "https://bookmygadi.app")
+    val devApiOrigin = props.getProperty("DEV_API_ORIGIN", prodApiOrigin)
+    val devWsOrigin = props.getProperty(
+        "DEV_WS_ORIGIN",
+        prodApiOrigin.replace("https://", "wss://").replace("http://", "ws://"),
+    )
+    val devWebOrigin = props.getProperty("DEV_WEB_ORIGIN", prodWebOrigin)
 
     defaultConfig {
         applicationId = "com.bookmygadi.user"

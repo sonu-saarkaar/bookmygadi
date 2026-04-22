@@ -17,8 +17,30 @@ const distanceKm = (lat1?: number | null, lon1?: number | null, lat2?: number | 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c;
 };
 
-const SlidableAction = ({ label, colorClass, onPerform, disabled, isDoneText = "Processing..." }: any) => {
+const formatRideStatusLabel = (status?: string | null) => {
+  const value = String(status || "").toLowerCase();
+  if (value === "pending") return "Pending";
+  if (value === "accepted") return "Accepted";
+  if (value === "arriving") return "On The Way";
+  if (value === "in_progress") return "Ride Started";
+  if (value === "completed") return "Completed";
+  if (value === "cancelled" || value === "canceled") return "Cancelled";
+  if (value === "rejected") return "Rejected";
+  return "Active Ride";
+};
+
+const SlidableAction = ({
+   label,
+   colorClass,
+   trackClass,
+   labelClass,
+   doneClass,
+   onPerform,
+   disabled,
+   isDoneText = "Done",
+}: any) => {
    const [done, setDone] = useState(false);
+   const [busy, setBusy] = useState(false);
    const containerRef = useRef<HTMLDivElement>(null);
    const x = useMotionValue(0);
    const controls = useAnimation();
@@ -26,16 +48,28 @@ const SlidableAction = ({ label, colorClass, onPerform, disabled, isDoneText = "
    // Fades out the background text as you drag the handle
    const textOpacity = useTransform(x, [0, 120], [1, 0]);
 
-   const handleDragEnd = (_e: any, info: any) => {
+   const resetSlider = () => {
+      setDone(false);
+      setBusy(false);
+      controls.start({ x: 0, transition: { type: "spring", stiffness: 400, damping: 25 } });
+   };
+
+   const handleDragEnd = async (_e: any, info: any) => {
       const containerWidth = containerRef.current?.offsetWidth || 300;
       // You must slide 65% of the bar's length to trigger it
       const threshold = containerWidth * 0.65;
 
       if (x.get() >= threshold) {
          setDone(true);
+         setBusy(true);
          // Move to the very end instantly
-         controls.start({ x: containerWidth - 60, transition: { duration: 0.2 } });
-         onPerform();
+         await controls.start({ x: containerWidth - 60, transition: { duration: 0.2 } });
+         const success = await onPerform();
+         if (!success) {
+            resetSlider();
+            return;
+         }
+         setBusy(false);
       } else {
          // Snaps back smoothly if you didn't reach the threshold
          controls.start({ x: 0, transition: { type: "spring", stiffness: 400, damping: 25 } });
@@ -43,18 +77,18 @@ const SlidableAction = ({ label, colorClass, onPerform, disabled, isDoneText = "
    };
 
    return (
-      <div ref={containerRef} className="relative w-[105%] -ml-[2.5%] h-[66px] bg-slate-900 rounded-full shadow-[inset_0_4px_10px_rgba(0,0,0,0.4)] p-1.5 flex items-center overflow-hidden mb-3 isolate border border-slate-700/50">
+      <div ref={containerRef} className={`relative w-[105%] -ml-[2.5%] h-[70px] rounded-[28px] p-1.5 flex items-center overflow-hidden mb-3 isolate border shadow-[inset_0_4px_16px_rgba(15,23,42,0.18),0_16px_32px_rgba(37,99,235,0.14)] ${trackClass || "bg-blue-600 border-blue-500/30"}`}>
          {/* Background Label */}
          <motion.div style={{ opacity: done ? 0 : textOpacity }} className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-[12px] font-black text-slate-300 uppercase tracking-[0.22em] pl-6 drop-shadow-sm">
+            <span className={`text-[12px] font-black uppercase tracking-[0.22em] pl-6 drop-shadow-sm ${labelClass || "text-blue-50"}`}>
                Slide to {label}
             </span>
          </motion.div>
 
          {/* Done Label */}
          <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-500 ease-out ${done ? 'opacity-100' : 'opacity-0'}`}>
-            <span className="text-[12px] font-black text-emerald-400 uppercase tracking-[0.22em] drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]">
-               {isDoneText}
+            <span className={`text-[12px] font-black uppercase tracking-[0.22em] ${doneClass || "text-slate-950"} drop-shadow-sm`}>
+               {busy ? isDoneText : "Completed"}
             </span>
          </div>
 
@@ -69,7 +103,7 @@ const SlidableAction = ({ label, colorClass, onPerform, disabled, isDoneText = "
                animate={controls}
                style={{ x }}
                whileTap={{ scale: 0.94 }}
-               className={`relative z-10 w-[54px] h-[54px] rounded-full bg-gradient-to-b ${colorClass} flex items-center justify-center shadow-[0_2px_15px_rgba(0,0,0,0.5)] cursor-grab active:cursor-grabbing border border-white/20`}
+               className={`relative z-10 w-[58px] h-[58px] rounded-[22px] bg-gradient-to-b ${colorClass} flex items-center justify-center shadow-[0_10px_24px_rgba(2,6,23,0.35)] cursor-grab active:cursor-grabbing border border-white/20`}
             >
                <ChevronRight className="text-white drop-shadow-md" size={28} strokeWidth={2.5} />
             </motion.div>
@@ -81,8 +115,10 @@ const SlidableAction = ({ label, colorClass, onPerform, disabled, isDoneText = "
 const RiderRideDetailsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { rideId = "" } = useParams();
+  const { rideId = "", bookingId = "" } = useParams();
+  const routeRideKey = decodeURIComponent(bookingId || rideId || "").trim();
   const [ride, setRide] = useState<RiderActiveRide | RiderRequest | null>(location.state?.ride || null);
+  const [resolvedRideId, setResolvedRideId] = useState(location.state?.ride?.id || "");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [tracking, setTracking] = useState<RiderTracking | null>(null);
@@ -163,24 +199,27 @@ const RiderRideDetailsPage = () => {
   const loadRide = async () => {
     try {
       const activeRows = await riderApi.listActiveRides();
-      let found = activeRows.find((r) => r.id === rideId);
+      let found = activeRows.find((r) => r.id === routeRideKey || r.booking_display_id === routeRideKey);
       if (!found) {
         const pendingRows = await riderApi.listRequests();
-        found = pendingRows.find((r) => r.id === rideId) as any;
+        found = pendingRows.find((r) => r.id === routeRideKey || r.booking_display_id === routeRideKey) as any;
       }
-      if (found) setRide(found);
+      if (found) {
+        setRide(found);
+        setResolvedRideId(found.id);
+      }
     } catch { }
   };
 
   useEffect(() => {
-    if (!rideId) { navigate("/rider/home", { replace: true }); return; }
+    if (!routeRideKey) { navigate("/rider/home", { replace: true }); return; }
     loadRide(); 
 
     let disposed = false;
     let ws: WebSocket | null = null;
     const wsTimer = window.setTimeout(() => {
       if (disposed) return;
-      const wsUrl = backendApi.rideWebsocketUrl(rideId);
+      const wsUrl = backendApi.rideWebsocketUrl(resolvedRideId || routeRideKey);
       if (!wsUrl) return;
 
       try {
@@ -214,7 +253,8 @@ const RiderRideDetailsPage = () => {
 
     const loadChat = async () => {
       try {
-        const msgs = await riderApi.getMessages(rideId);
+        const activeId = resolvedRideId || routeRideKey;
+        const msgs = await riderApi.getMessages(activeId);
         setMessages(msgs);
       } catch { }
     };
@@ -233,11 +273,12 @@ const RiderRideDetailsPage = () => {
                ws.close();
             }
     };
-  }, [rideId, navigate, showChat]);
+  }, [routeRideKey, resolvedRideId, navigate, showChat]);
 
   // Driver Location Transmitter
   useEffect(() => {
-    if (!rideId || rideStatus === "pending" || rideStatus === "cancelled" || rideStatus === "completed") return;
+    const activeId = resolvedRideId || routeRideKey;
+    if (!activeId || rideStatus === "pending" || rideStatus === "cancelled" || rideStatus === "completed") return;
     let watchId: number;
     let lastSent = 0;
     
@@ -246,7 +287,7 @@ const RiderRideDetailsPage = () => {
         (position) => {
           const now = Date.now();
           if (now - lastSent > 3000) { // throttle to max 1 request every 3s
-            riderApi.updateDriverLocation(rideId, position.coords.latitude, position.coords.longitude).catch(() => {});
+            riderApi.updateDriverLocation(activeId, position.coords.latitude, position.coords.longitude).catch(() => {});
             lastSent = now;
           }
         },
@@ -257,12 +298,13 @@ const RiderRideDetailsPage = () => {
     return () => {
       if (watchId) navigator.geolocation.clearWatch(watchId);
     };
-  }, [rideId, rideStatus]);
+  }, [resolvedRideId, routeRideKey, rideStatus]);
 
   const sendMessage = async () => {
-    if (!chatText.trim() || !rideId) return;
+    const activeId = resolvedRideId || routeRideKey;
+    if (!chatText.trim() || !activeId) return;
     try {
-      const msg = await riderApi.sendMessage(rideId, chatText.trim());
+      const msg = await riderApi.sendMessage(activeId, chatText.trim());
       setMessages(m => [...m, msg]);
       setChatText("");
     } catch {
@@ -271,10 +313,11 @@ const RiderRideDetailsPage = () => {
   };
 
   useEffect(() => {
-    if (!rideId) return;
-    const loadTracking = async () => { try { const data = await riderApi.getActiveTracking(rideId); setTracking(data); } catch { } };
+    const activeId = resolvedRideId || routeRideKey;
+    if (!activeId) return;
+    const loadTracking = async () => { try { const data = await riderApi.getActiveTracking(activeId); setTracking(data); } catch { } };
     loadTracking(); const id = window.setInterval(loadTracking, 3000); return () => window.clearInterval(id);
-  }, [rideId]);
+  }, [resolvedRideId, routeRideKey]);
 
   useEffect(() => {
     if (isRideStarted) setShowCustomerDetails(false);
@@ -314,10 +357,13 @@ const RiderRideDetailsPage = () => {
    }, []);
 
   const updateStatus = async (status: "arriving" | "in_progress" | "completed" | "cancelled", startOtp?: string) => {
-    if (!ride) return; setLoading(true);
+    if (!ride) return false;
+    setLoading(true);
     try {
       const updated = await riderApi.updateActiveRideStatusWithOtp(ride.id, status, startOtp);
-      setRide(updated); playSound("confirmation");
+      setRide(updated);
+      playSound("confirmation");
+      setNotice("");
       if (status === "completed") {
          const paymentSummary = {
             rideId: updated.id,
@@ -332,18 +378,19 @@ const RiderRideDetailsPage = () => {
          navigate(`/rider/payment/${ride.id}`, { state: paymentSummary });
       }
       if (status === "cancelled") {
-        setNotice("Ride cancelled successfully");
         navigate("/rider/home");
       }
+      return true;
     } catch (error) { 
       setNotice(error instanceof Error ? error.message : "Update failed"); 
       setTimeout(() => setNotice(''), 3000);
+      return false;
     } finally { setLoading(false); }
   };
 
   const handleCancel = () => {
     if (window.confirm("ARE YOU SURE YOU WANT TO CANCEL THIS RIDE? This may affect your rider score.")) {
-      updateStatus("cancelled");
+      void updateStatus("cancelled");
     }
   };
 
@@ -361,9 +408,9 @@ const RiderRideDetailsPage = () => {
       ].join(", ");
 
       try {
-         await riderApi.createRideSupportTicket(rideId, {
+         await riderApi.createRideSupportTicket(resolvedRideId || routeRideKey, {
             issue_type: "complaint",
-            title: `Complaint Regarding Ride · BMG${rideId.slice(-6).toUpperCase()}`,
+            title: `Complaint Regarding Ride · ${ride?.booking_display_id || rideId}`,
             description: `Auto complaint registered from rider panel. Selected complaint buckets: ${complaintSummary}.`,
             severity: "high",
             source_panel: "rider",
@@ -388,9 +435,9 @@ const RiderRideDetailsPage = () => {
       ].join(", ");
 
       try {
-         await riderApi.createRideSupportTicket(rideId, {
+         await riderApi.createRideSupportTicket(resolvedRideId || routeRideKey, {
             issue_type: "vehicle_issue",
-            title: `Vehicle Issue · BMG${rideId.slice(-6).toUpperCase()}`,
+            title: `Vehicle Issue · ${ride?.booking_display_id || rideId}`,
             description: `Vehicle issue auto-registered from rider panel. Issue buckets: ${vehicleIssueSummary}.`,
             severity: "critical",
             source_panel: "rider",
@@ -402,10 +449,44 @@ const RiderRideDetailsPage = () => {
    };
 
   const slideAction = useMemo(() => {
-    if (rideStatus === "accepted") return { label: "ARRIVED AT PICKUP", next: "arriving" as const, color: "from-blue-600 to-blue-700" };
-    if (rideStatus === "arriving") return { label: "VERIFY OTP & START", next: "in_progress" as const, color: "from-amber-500 to-amber-600" };
-    if (rideStatus === "in_progress") return { label: "COMPLETE RIDE", next: "completed" as const, color: "from-emerald-600 to-emerald-700" };
-    return { label: "RIDE FINISHED", next: null, color: "from-gray-500 to-gray-600" };
+    if (rideStatus === "accepted") {
+      return {
+        label: "ARRIVED AT PICKUP",
+        next: "arriving" as const,
+        color: "from-slate-900 to-slate-700",
+        trackClass: "bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 border-blue-300/30",
+        labelClass: "text-white",
+        doneClass: "text-slate-950",
+      };
+    }
+    if (rideStatus === "arriving") {
+      return {
+        label: "VERIFY OTP & START",
+        next: "in_progress" as const,
+        color: "from-slate-900 to-slate-700",
+        trackClass: "bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-400 border-amber-200/40",
+        labelClass: "text-slate-950",
+        doneClass: "text-slate-950",
+      };
+    }
+    if (rideStatus === "in_progress") {
+      return {
+        label: "COMPLETE RIDE",
+        next: "completed" as const,
+        color: "from-slate-900 to-slate-700",
+        trackClass: "bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 border-emerald-200/40",
+        labelClass: "text-slate-950",
+        doneClass: "text-slate-950",
+      };
+    }
+    return {
+      label: "RIDE FINISHED",
+      next: null,
+      color: "from-slate-700 to-slate-600",
+      trackClass: "bg-slate-200 border-slate-300",
+      labelClass: "text-slate-700",
+      doneClass: "text-slate-900",
+    };
   }, [rideStatus]);
 
   const pickupToDropKm = distanceKm(tracking?.pickup_lat, tracking?.pickup_lng, tracking?.destination_lat, tracking?.destination_lng);
@@ -417,9 +498,13 @@ const RiderRideDetailsPage = () => {
     if (!ride) return;
     setLoading(true);
     try {
-      await riderApi.acceptRequest(ride.id, ride.agreed_fare || (ride as RiderRequest).latest_offer_amount || ride.estimated_fare_max || undefined);
+      const acceptedRide = await riderApi.acceptRequest(
+        ride.id,
+        ride.agreed_fare || (ride as RiderRequest).latest_offer_amount || ride.estimated_fare_max || undefined,
+      );
       playSound("confirmation");
       setNotice("Ride accepted!");
+      setRide(acceptedRide);
       loadRide();
     } catch (e: any) {
       setNotice(e.message || "Accept failed");
@@ -443,6 +528,15 @@ const RiderRideDetailsPage = () => {
     }
   };
 
+  const onQuickCancelRide = async () => {
+    if (!ride) return;
+    if (rideStatus === "pending") {
+      await onReject();
+      return;
+    }
+    handleCancel();
+  };
+
   const onNegotiate = async () => {
     if (!ride) return;
     const amount = Number(counterAmount.replace(/,/g, ""));
@@ -461,12 +555,12 @@ const RiderRideDetailsPage = () => {
   };
 
    const triggerRideAction = async () => {
-      if (!slideAction.next || loading) return;
+      if (!slideAction.next || loading) return false;
       if (slideAction.next === "in_progress") {
          setShowOtpModal(true);
-         return;
+         return false;
       }
-      await updateStatus(slideAction.next);
+      return await updateStatus(slideAction.next);
    };
    const handleSOS = async () => {
       const now = Date.now();
@@ -490,9 +584,9 @@ const RiderRideDetailsPage = () => {
       setNotice(`🚨 SOS SENT TO ADMIN & EMERGENCY CONTACTS! 🚨`);
       
       try {
-         await riderApi.createRideSupportTicket(rideId, {
+         await riderApi.createRideSupportTicket(resolvedRideId || routeRideKey, {
             issue_type: "sos_emergency",
-            title: `🚨 CRITICAL SOS: RIDER · BMG${rideId.slice(-6).toUpperCase()}`,
+            title: `🚨 CRITICAL SOS: RIDER · ${ride?.booking_display_id || rideId}`,
             description: `EMERGENCY SOS triggered by RIDER. Please immediately trace Live Location: Lat ${tracking?.driver_live_lat}, Lng ${tracking?.driver_live_lng}. Alert their emergency contacts. Current Status: ${rideStatus}. Mobile Data Received.`,
             severity: "critical",
             source_panel: "rider"
@@ -532,7 +626,7 @@ const RiderRideDetailsPage = () => {
       
       window.addEventListener("message", handleNativeMessage);
       return () => window.removeEventListener("message", handleNativeMessage);
-   }, [rideId, tracking, rideStatus]);
+   }, [resolvedRideId, routeRideKey, tracking, rideStatus]);
 
    const confirmOtpAndStart = async () => {
       const otp = otpValue.replace(/\s+/g, "").trim();
@@ -770,19 +864,22 @@ const RiderRideDetailsPage = () => {
                      key={slideAction.next}
                      label={slideAction.label}
                      colorClass={slideAction.color}
+                     trackClass={slideAction.trackClass}
+                     labelClass={slideAction.labelClass}
+                     doneClass={slideAction.doneClass}
                      onPerform={triggerRideAction}
                      disabled={loading}
-                     isDoneText={loading ? "Processing..." : "Action Triggered!"}
+                     isDoneText="Updating ride..."
                   />
                ) : (
                   <div className="bg-[#EEF2FF] rounded-[22px] p-4 border border-indigo-100 shadow-sm">
                      <div className="flex justify-between items-center">
                         <div>
                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Booking ID</p>
-                           <p className="text-sm font-black text-indigo-900">BMG{ride.id.slice(-6).toUpperCase()}</p>
+                           <p className="text-sm font-black text-indigo-900">{ride.booking_display_id || ride.id}</p>
                         </div>
-                        <div className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tighter border ${rideStatus === "in_progress" ? "bg-emerald-500 text-white border-emerald-400" : rideStatus === "pending" ? "bg-amber-50 text-amber-600 border-amber-100" : "bg-white text-indigo-600 border-indigo-100"}`}>
-                           {rideStatus === "in_progress" ? "Ride In-Progress" : rideStatus === "pending" ? "Pending" : "Confirmed"}
+                        <div className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tighter border bg-white text-indigo-600 border-indigo-100">
+                           {formatRideStatusLabel(ride.status)}
                         </div>
                      </div>
                   </div>
@@ -795,7 +892,7 @@ const RiderRideDetailsPage = () => {
                      </div>
                      <div className="flex-1">
                         <h3 className="text-lg font-black text-gray-900 leading-tight">{(ride as RiderActiveRide).customer_name || "Customer Request"}</h3>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ID: BMG-{ride.id.slice(-6).toUpperCase()}</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ID: {ride.booking_display_id || ride.id}</p>
                         <p className="text-[10px] font-black text-indigo-500 uppercase">{ride.vehicle_type}</p>
                      </div>
                   </div>
@@ -952,9 +1049,9 @@ const RiderRideDetailsPage = () => {
                         <ShieldAlert size={20} className="text-blue-500 mb-1" />
                         <span className="text-[9px] font-black text-blue-600 uppercase">Call 112</span>
                      </button>
-                     <button onClick={onCall} className="flex flex-col flex-1 items-center justify-center py-2.5 rounded-xl bg-emerald-50 border border-emerald-100 active:scale-95 transition-transform">
-                        <Phone size={20} className="text-emerald-500 mb-1" />
-                        <span className="text-[9px] font-black text-emerald-600 uppercase">Call Rider</span>
+                     <button onClick={onQuickCancelRide} className="flex flex-col flex-1 items-center justify-center py-2.5 rounded-xl bg-amber-50 border border-amber-100 active:scale-95 transition-transform">
+                        <X size={20} className="text-amber-500 mb-1" />
+                        <span className="text-[9px] font-black text-amber-600 uppercase">Cancel Ride</span>
                      </button>
                      <button onClick={onBMGSupport} className="flex flex-col flex-1 items-center justify-center py-2.5 rounded-xl bg-gray-50 border border-gray-200 active:scale-95 transition-transform">
                         <Menu size={20} className="text-gray-500 mb-1" />

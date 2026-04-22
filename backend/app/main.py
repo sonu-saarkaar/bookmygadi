@@ -1,4 +1,6 @@
 from collections import defaultdict, deque
+from datetime import datetime
+import json
 import time
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -22,9 +24,9 @@ from app.api.users_mgmt import router as users_mgmt_router
 from app.admin_panel import admin_app_router
 from app.core.config import settings
 from app.core.db_backup import create_sqlite_backup
-from app.core.security import get_password_hash
+from app.core.security import decode_access_token, get_password_hash
 from app.db import Base, engine
-from app.models import User, VehicleInventory
+from app.models import Ride, User, VehicleInventory
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -56,6 +58,18 @@ def ensure_schema_updates() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_lat FLOAT"))
         if ride_cols and "customer_live_lng" not in ride_col_names:
             conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_lng FLOAT"))
+        if ride_cols and "driver_live_accuracy" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN driver_live_accuracy FLOAT"))
+        if ride_cols and "driver_live_heading" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN driver_live_heading FLOAT"))
+        if ride_cols and "driver_live_updated_at" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN driver_live_updated_at DATETIME"))
+        if ride_cols and "customer_live_accuracy" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_accuracy FLOAT"))
+        if ride_cols and "customer_live_heading" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_heading FLOAT"))
+        if ride_cols and "customer_live_updated_at" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_updated_at DATETIME"))
         if ride_cols and "requested_fare" not in ride_col_names:
             conn.execute(text("ALTER TABLE rides ADD COLUMN requested_fare INTEGER"))
 
@@ -358,6 +372,16 @@ app.add_middleware(
 )
 
 _rate_buckets: dict[str, deque] = defaultdict(deque)
+_ws_rate_buckets: dict[str, deque] = defaultdict(deque)
+_ws_metrics: dict[str, dict[str, float | int | None]] = defaultdict(
+    lambda: {
+        "messages_in": 0,
+        "messages_out": 0,
+        "last_in_at": None,
+        "last_out_at": None,
+        "last_latency_ms": None,
+    }
+)
 
 
 @app.middleware("http")
@@ -391,12 +415,183 @@ app.include_router(users_mgmt_router, prefix=settings.api_prefix)
 app.include_router(admin_app_router)
 
 
+def _extract_ws_token(websocket: WebSocket) -> str | None:
+    auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    return websocket.query_params.get("token")
+
+
+def _distance_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
+    from math import atan2, cos, radians, sin, sqrt
+
+    r = 6371000.0
+    dlat = radians(b_lat - a_lat)
+    dlon = radians(b_lng - a_lng)
+    aa = sin(dlat / 2) ** 2 + cos(radians(a_lat)) * cos(radians(b_lat)) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(aa), sqrt(1 - aa))
+    return r * c
+
+
+def _apply_ws_location_update(ride: Ride, actor: str, payload: dict) -> dict:
+    lat = float(payload["lat"])
+    lng = float(payload["lng"])
+    accuracy = float(payload["accuracy"]) if payload.get("accuracy") is not None else None
+    heading = float(payload["heading"]) if payload.get("heading") is not None else None
+    if accuracy is not None and accuracy > 50:
+        raise ValueError("weak_accuracy")
+
+    ts_raw = payload.get("ts")
+    observed_at = datetime.fromisoformat(ts_raw) if isinstance(ts_raw, str) and ts_raw else datetime.utcnow()
+
+    prev_lat = ride.driver_live_lat if actor == "driver" else ride.customer_live_lat
+    prev_lng = ride.driver_live_lng if actor == "driver" else ride.customer_live_lng
+    prev_updated_at = ride.driver_live_updated_at if actor == "driver" else ride.customer_live_updated_at
+
+    if prev_updated_at and observed_at <= prev_updated_at:
+        raise ValueError("out_of_order")
+
+    if prev_lat is not None and prev_lng is not None and prev_updated_at is not None:
+        seconds = max((observed_at - prev_updated_at).total_seconds(), 0.001)
+        speed_kmh = (_distance_meters(prev_lat, prev_lng, lat, lng) / seconds) * 3.6
+        if speed_kmh > 180:
+            raise ValueError("speed_jump")
+
+    if actor == "driver":
+        ride.driver_live_lat = lat
+        ride.driver_live_lng = lng
+        ride.driver_live_accuracy = accuracy
+        ride.driver_live_heading = heading
+        ride.driver_live_updated_at = observed_at
+    else:
+        ride.customer_live_lat = lat
+        ride.customer_live_lng = lng
+        ride.customer_live_accuracy = accuracy
+        ride.customer_live_heading = heading
+        ride.customer_live_updated_at = observed_at
+
+    return {
+        "event": "location_update",
+        "type": "location_update",
+        "ride_id": ride.id,
+        "actor": actor,
+        "lat": lat,
+        "lng": lng,
+        "accuracy": accuracy,
+        "heading": heading,
+        "ts": observed_at.isoformat(),
+        "driver_live_lat": ride.driver_live_lat,
+        "driver_live_lng": ride.driver_live_lng,
+        "driver_live_accuracy": ride.driver_live_accuracy,
+        "driver_live_heading": ride.driver_live_heading,
+        "driver_live_updated_at": ride.driver_live_updated_at.isoformat() if ride.driver_live_updated_at else None,
+        "customer_live_lat": ride.customer_live_lat,
+        "customer_live_lng": ride.customer_live_lng,
+        "customer_live_accuracy": ride.customer_live_accuracy,
+        "customer_live_heading": ride.customer_live_heading,
+        "customer_live_updated_at": ride.customer_live_updated_at.isoformat() if ride.customer_live_updated_at else None,
+        "status": ride.status,
+    }
+
+
 @app.websocket("/ws/rides/{ride_id}")
 async def ride_ws(websocket: WebSocket, ride_id: str):
+    token = _extract_ws_token(websocket)
+    if not token:
+        await websocket.close(code=4401, reason="Missing token")
+        return
+
+    user_id = decode_access_token(token)
+    if not user_id:
+        await websocket.close(code=4401, reason="Invalid token")
+        return
+
+    with Session(engine) as db:
+        ride = db.get(Ride, ride_id)
+        user = db.get(User, user_id)
+        if not ride or not user:
+            await websocket.close(code=4404, reason="Ride or user not found")
+            return
+        if user.role != "admin" and user.id not in {ride.customer_id, ride.driver_id}:
+            await websocket.close(code=4403, reason="Forbidden")
+            return
+
     await realtime_manager.connect(ride_id, websocket)
+    await realtime_manager.broadcast(
+        ride_id,
+        {
+            "event": "presence",
+            "type": "presence",
+            "ride_id": ride_id,
+            "user_id": user_id,
+            "role": user.role,
+            "connected_at": datetime.utcnow().isoformat(),
+        },
+    )
     try:
         while True:
-            _ = await websocket.receive_text()
+            raw = await websocket.receive_text()
+            now = time.time()
+            rate_key = f"{ride_id}:{user_id}"
+            dq = _ws_rate_buckets[rate_key]
+            while dq and now - dq[0] > 10:
+                dq.popleft()
+            if len(dq) >= 30:
+                await websocket.send_json({"event": "error", "detail": "WS rate limit exceeded"})
+                continue
+            dq.append(now)
+
+            metrics = _ws_metrics[ride_id]
+            metrics["messages_in"] = int(metrics["messages_in"] or 0) + 1
+            metrics["last_in_at"] = now
+
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_json({"event": "error", "detail": "Invalid JSON"})
+                continue
+
+            message_type = payload.get("type") or payload.get("event")
+            if message_type == "ping":
+                await websocket.send_json({"event": "pong", "ts": datetime.utcnow().isoformat()})
+                continue
+
+            if message_type not in {"driver_location", "customer_location"}:
+                await websocket.send_json({"event": "ignored", "detail": "Unsupported event"})
+                continue
+
+            actor = "driver" if message_type == "driver_location" else "customer"
+            with Session(engine) as db:
+                ride = db.get(Ride, ride_id)
+                user = db.get(User, user_id)
+                if not ride or not user:
+                    await websocket.send_json({"event": "error", "detail": "Ride or user missing"})
+                    continue
+                if actor == "driver" and user.role != "admin" and user.id != ride.driver_id:
+                    await websocket.send_json({"event": "error", "detail": "Not allowed to update driver location"})
+                    continue
+                if actor == "customer" and user.role != "admin" and user.id != ride.customer_id:
+                    await websocket.send_json({"event": "error", "detail": "Not allowed to update customer location"})
+                    continue
+                try:
+                    outbound = _apply_ws_location_update(ride, actor, payload)
+                except (KeyError, TypeError, ValueError) as exc:
+                    await websocket.send_json({"event": "error", "detail": f"Invalid location payload: {exc}"})
+                    continue
+                db.commit()
+
+            sent_at = time.time()
+            metrics["messages_out"] = int(metrics["messages_out"] or 0) + 1
+            metrics["last_out_at"] = sent_at
+            if payload.get("ts"):
+                try:
+                    metrics["last_latency_ms"] = max(
+                        0.0,
+                        (datetime.utcnow() - datetime.fromisoformat(str(payload["ts"]))).total_seconds() * 1000,
+                    )
+                except Exception:
+                    pass
+            await realtime_manager.broadcast(ride_id, outbound)
     except WebSocketDisconnect:
         realtime_manager.disconnect(ride_id, websocket)
 

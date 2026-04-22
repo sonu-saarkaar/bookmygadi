@@ -5,6 +5,97 @@ import { Navigation, Clock, Zap, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { backendApi } from "@/services/backendApi";
 
+const DEFAULT_SERVICES = [
+  {
+    id: "default-instant-car",
+    title: "Instant Ride Car",
+    description: "Comfortable city and outstation trips",
+    vehicle_type: "car",
+    service_mode: "Instant Ride",
+    vehicle_model: "Swift",
+    icon_name: "Car",
+    tag_highlight: "Best Value",
+    color_scheme: "from-emerald-400 to-emerald-600",
+  },
+  {
+    id: "default-bike",
+    title: "Bike Ride",
+    description: "Fast and affordable commute for solo travellers",
+    vehicle_type: "bike",
+    service_mode: "Instant Ride",
+    vehicle_model: "Bike",
+    icon_name: "Bike",
+    tag_highlight: "Popular",
+    color_scheme: "from-amber-400 to-orange-500",
+  },
+  {
+    id: "default-auto",
+    title: "Auto Ride",
+    description: "Economical 3-Wheeler and E-Rikhsaw for local markets",
+    vehicle_type: "auto",
+    service_mode: "Instant Ride",
+    vehicle_model: "Auto",
+    icon_name: "Navigation",
+    tag_highlight: "Eco-friendly",
+    color_scheme: "from-teal-400 to-teal-600",
+  },
+  {
+    id: "default-pickup",
+    title: "Mini Pickup",
+    description: "Light goods delivery within the city limits",
+    vehicle_type: "bolero",
+    service_mode: "Instant Ride",
+    vehicle_model: "Pickup",
+    icon_name: "Truck",
+    tag_highlight: "Fast Delivery",
+    color_scheme: "from-cyan-500 to-blue-600",
+  },
+  {
+    id: "default-reserve-general",
+    title: "General Outstation",
+    description: "Pre-booked cars for intercity travel and tours",
+    vehicle_type: "car",
+    service_mode: "reserve",
+    vehicle_model: "Swift",
+    icon_name: "MapPin",
+    tag_highlight: "Reliable",
+    color_scheme: "from-indigo-400 to-blue-600",
+  },
+  {
+    id: "default-reserve-events",
+    title: "Wedding & Events",
+    description: "Luxury car decoration for Dulha/Dulhan & Guests",
+    vehicle_type: "car",
+    service_mode: "reserve",
+    vehicle_model: "Wedding Special",
+    icon_name: "PartyPopper",
+    tag_highlight: "Premium",
+    color_scheme: "from-rose-500 to-pink-600",
+  },
+  {
+    id: "default-reserve-logistics",
+    title: "Logistics & Farming",
+    description: "Heavy duty vehicles for bulk shifting and farming tools",
+    vehicle_type: "bolero",
+    service_mode: "reserve",
+    vehicle_model: "Logistics",
+    icon_name: "Truck",
+    tag_highlight: "Heavy Duty",
+    color_scheme: "from-slate-700 to-slate-900",
+  },
+] as const;
+
+const normalizeServiceMode = (value?: string | null) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "instant ride" || normalized === "instant" || normalized === "instant ride (on-demand)") {
+    return "Instant Ride";
+  }
+  if (normalized === "reserve" || normalized === "reserved" || normalized === "reserved trip" || normalized === "reserve (scheduled)") {
+    return "reserve";
+  }
+  return value || "Instant Ride";
+};
+
 const ServicesPage = () => {
   const [viewType, setViewType] = useState<"Instant Ride" | "reserve">("Instant Ride");
   const [services, setServices] = useState<any[]>([]);
@@ -15,7 +106,16 @@ const ServicesPage = () => {
 
   const loadServices = () => {
     backendApi.listServices()
-      .then(setServices)
+      .then((rows) => {
+        const normalizedRows = (rows || []).map((item) => ({
+          ...item,
+          service_mode: normalizeServiceMode(item.service_mode),
+        }));
+        setServices(normalizedRows.length > 0 ? normalizedRows : [...DEFAULT_SERVICES]);
+      })
+      .catch(() => {
+        setServices([...DEFAULT_SERVICES]);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -35,7 +135,7 @@ const ServicesPage = () => {
     };
   }, []);
 
-  const activeServices = services.filter(s => s.service_mode === viewType);
+  const activeServices = services.filter((s) => normalizeServiceMode(s.service_mode) === viewType);
 
   return (
     <div className="relative isolate w-full px-2 min-h-[90vh] pb-24">
@@ -82,7 +182,7 @@ const ServicesPage = () => {
             ) : activeServices.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200">
                  <p className="text-gray-400 font-bold">No services available for this mode</p>
-                 <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-widest">Configure via Admin Panel</p>
+                 <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-widest">Using live-safe fallback catalog</p>
               </div>
             ) : (
               activeServices.map((item, i) => {

@@ -68,6 +68,7 @@ const App = () => {
           <Route path="advance" element={<RiderAdvanceBookPage />} />
           <Route path="profile" element={<RiderProfilePage />} />
           <Route path="ride/:rideId" element={<RiderRideDetailsPage />} />
+          <Route path="booking-accepted/:bookingId" element={<RiderRideDetailsPage />} />
           <Route path="payment/:rideId" element={<RiderPaymentPage />} />
           <Route path="feedback/:rideId" element={<RiderFeedbackPage />} />
           <Route path="vehicle/new" element={<RiderVehicleRegistrationPage />} />
@@ -112,6 +113,7 @@ const App = () => {
           <Route path="profile" element={<ProfilePage />} />
           <Route path="searching" element={<SearchingPage />} />
           <Route path="booking-confirmed" element={<BookingConfirmedPage />} />
+          <Route path="booking-confirmed/:bookingId" element={<BookingConfirmedPage />} />
           <Route path="booking-rejected" element={<BookingRejectedPage />} />
           <Route path="booking-cancelled" element={<BookingCancelledPage />} />
           <Route path="payment/:rideId" element={<UserPaymentPage />} />
