@@ -5,23 +5,35 @@ import time
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
+import logging
 from fastapi.responses import JSONResponse
 
-from app.api.auth import router as auth_router
-from app.api.admin import router as admin_router
-from app.api.admin_enterprise import router as admin_enterprise_router
-from app.api.pricing import router as pricing_router
-from app.api.payment import router as payment_router
-from app.api.realtime import realtime_manager
-from app.api.rider import router as rider_router
-from app.api.rides import router as rides_router
-from app.api.services import router as services_router
-from app.api.system import router as system_router
-from app.api.vehicles import router as vehicles_router
-from app.api.radar import router as radar_router
-from app.api.crm import router as crm_router
-from app.api.users_mgmt import router as users_mgmt_router
+from app.api.common.auth import router as auth_router
+from app.api.admin.admin import router as admin_router
+from app.api.admin.admin_enterprise import router as admin_enterprise_router
+from app.api.admin.ops_console import router as ops_console_router
+from app.api.user.pricing import router as pricing_router
+from app.api.user.payment import router as payment_router
+from app.api.common.realtime import realtime_manager
+from app.api.rider.rider import router as rider_router
+from app.api.user.rides import router as rides_router
+from app.api.user.services import router as services_router
+from app.api.common.system import router as system_router
+from app.api.user.vehicles import router as vehicles_router
+from app.api.user.radar import router as radar_router
+from app.api.admin.crm import router as crm_router
+from app.api.admin.users_mgmt import router as users_mgmt_router
 from app.admin_panel import admin_app_router
+from app.admin_system.routes import router as parallel_admin_router
+from app.ride_intelligence.routes import router as ride_intelligence_router
+from app.ride_intelligence.websockets import router as ride_intelligence_ws_router
+from app.enterprise.routes import router as enterprise_router
+from app.distributed_platform.routes import router as distributed_platform_router
+from app.pricing_engine.routes import router as pricing_engine_router
+from app.admin_system.middlewares import AdminAuditMiddleware, SecureUploadMiddleware
 from app.core.config import settings
 from app.core.db_backup import create_sqlite_backup
 from app.core.security import decode_access_token, get_password_hash
@@ -34,6 +46,9 @@ from sqlalchemy.orm import Session
 # Keep a point-in-time copy before runtime migrations or seeding touches the DB.
 create_sqlite_backup(settings.database_url)
 Base.metadata.create_all(bind=engine)
+
+if settings.app_env.lower() == "production" and settings.secret_key == "change-me-in-production":
+    raise RuntimeError("SECRET_KEY must be configured in production.")
 
 
 def ensure_schema_updates() -> None:
@@ -162,8 +177,19 @@ def ensure_reserve_price_columns() -> None:
             conn.execute(text("ALTER TABLE reserve_route_prices ADD COLUMN price_24h INTEGER"))
 
 
+def ensure_performance_indexes() -> None:
+    """Lightweight indexes for hot queries (SQLite + Postgres compatible DDL)."""
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_status_created ON rides (status, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_driver_status ON rides (driver_id, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_customer_created ON rides (customer_id, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ride_search_events_status_started ON ride_search_events (status, search_started_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role_driver_status ON users (role, driver_status)"))
+
+
 ensure_schema_updates()
 ensure_reserve_price_columns()
+ensure_performance_indexes()
 
 
 def seed_demo_users() -> None:
@@ -254,7 +280,8 @@ def seed_demo_users() -> None:
         db.commit()
 
 
-seed_demo_users()
+if settings.app_env.lower() != "production":
+    seed_demo_users()
 
 
 def seed_demo_vehicles() -> None:
@@ -303,7 +330,8 @@ def seed_demo_vehicles() -> None:
         db.commit()
 
 
-seed_demo_vehicles()
+if settings.app_env.lower() != "production":
+    seed_demo_vehicles()
 
 
 def seed_services() -> None:
@@ -359,13 +387,17 @@ def seed_services() -> None:
         db.commit()
 
 
-seed_services()
+if settings.app_env.lower() != "production":
+    seed_services()
 
 app = FastAPI(title=settings.app_name)
+logging.basicConfig(level=logging.INFO)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.cors_origins + ["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -387,10 +419,24 @@ _ws_metrics: dict[str, dict[str, float | int | None]] = defaultdict(
 @app.middleware("http")
 async def basic_rate_limiter(request: Request, call_next):
     path = request.url.path or ""
+    client = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    if path.startswith(f"{settings.api_prefix}/pricing/quote") or path.startswith(
+        f"{settings.api_prefix}/pricing/reserve/quote"
+    ):
+        key = f"{client}:pricing"
+        dq = _rate_buckets[key]
+        while dq and now - dq[0] > 60:
+            dq.popleft()
+        if len(dq) >= 400:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Please retry shortly."})
+        dq.append(now)
+        return await call_next(request)
+
     protected = path.startswith(f"{settings.api_prefix}/auth") or path.startswith(f"{settings.api_prefix}/admin")
     if protected:
-        key = f"{request.client.host if request.client else 'unknown'}:{path}"
-        now = time.time()
+        key = f"{client}:{path}"
         dq = _rate_buckets[key]
         while dq and now - dq[0] > 60:
             dq.popleft()
@@ -403,6 +449,7 @@ app.include_router(system_router)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
 app.include_router(admin_enterprise_router, prefix=settings.api_prefix)
+app.include_router(ops_console_router, prefix=settings.api_prefix)
 app.include_router(services_router, prefix=settings.api_prefix)
 app.include_router(rides_router, prefix=settings.api_prefix)
 app.include_router(vehicles_router, prefix=settings.api_prefix)
@@ -413,6 +460,12 @@ app.include_router(payment_router, prefix=settings.api_prefix)
 app.include_router(crm_router, prefix=settings.api_prefix)
 app.include_router(users_mgmt_router, prefix=settings.api_prefix)
 app.include_router(admin_app_router)
+app.include_router(parallel_admin_router)
+app.include_router(pricing_engine_router, prefix=f"{settings.api_prefix}/pricing")
+app.include_router(ride_intelligence_router, prefix=f"{settings.api_prefix}/intelligence")
+app.include_router(ride_intelligence_ws_router)
+app.include_router(enterprise_router, prefix=f"{settings.api_prefix}/enterprise")
+app.include_router(distributed_platform_router, prefix=f"{settings.api_prefix}/distributed")
 
 
 def _extract_ws_token(websocket: WebSocket) -> str | None:
@@ -493,6 +546,16 @@ def _apply_ws_location_update(ride: Ride, actor: str, payload: dict) -> dict:
         "status": ride.status,
     }
 
+
+@app.websocket("/ws/rider/{rider_id}")
+async def websocket_rider_endpoint(websocket: WebSocket, rider_id: str):
+    await realtime_manager.connect_rider(rider_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Rider Echo: {data}")
+    except WebSocketDisconnect:
+        realtime_manager.disconnect_rider(rider_id, websocket)
 
 @app.websocket("/ws/rides/{ride_id}")
 async def ride_ws(websocket: WebSocket, ride_id: str):

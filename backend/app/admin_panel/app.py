@@ -19,7 +19,7 @@ from app.admin_panel.routes import (
     vehicles_router,
 )
 from app.admin_panel.services.common import init_doc
-from app.api.services import router as services_api_router
+from app.api.user.services import router as services_api_router
 
 admin_app_router = APIRouter(prefix="/api/v2")
 

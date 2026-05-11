@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     database_url: str = _default_database_url()
     cors_origins: list[str] = [
-        "http://localhost:5173",
         "https://bookmygadi.app",
         "https://www.bookmygadi.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ]
     mapbox_token: str = ""
     rider_app_api_key: str = "rider_app_linked_key_change_in_production"
@@ -35,6 +36,11 @@ class Settings(BaseSettings):
     # ── New: Razorpay Payment ─────────────────────────────────────
     razorpay_key_id: str = ""         # rzp_live_xxxx or rzp_test_xxxx
     razorpay_key_secret: str = ""     # Razorpay key secret
+
+    # Local instant rides: billable km cap (admin route still defines base segment & rates).
+    local_instant_pricing_cap_km: float = 10.0
+    # FCM dispatch: prefer drivers whose last live location is within this radius of pickup.
+    dispatch_prefer_radius_km: float = 15.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

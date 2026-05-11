@@ -549,6 +549,18 @@ class UserReferral(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(40), default="pending") # pending, rewarded
 
 
+class RefreshToken(Base, TimestampMixin):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
 class AuthOtp(Base, TimestampMixin):
     __tablename__ = "auth_otps"
 

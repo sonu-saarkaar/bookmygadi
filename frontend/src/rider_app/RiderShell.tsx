@@ -6,7 +6,7 @@ import { riderApi } from "@/services/riderApi";
 
 const navItems = [
   { to: "/rider/advance", label: "Schedule", icon: Calendar },
-  { to: "/rider/track", label: "Track", icon: Navigation },
+  { to: "/rider/track", label: "Rides", icon: Navigation },
   { to: "/rider/home", label: "Home", icon: Home, isCenter: true },
   { to: "/rider/earning", label: "Earnings", icon: Wallet },
   { to: "/rider/profile", label: "Profile", icon: User },

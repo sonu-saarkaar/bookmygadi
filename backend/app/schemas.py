@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -14,7 +14,12 @@ class HealthResponse(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
+    role: str | None = None
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -29,8 +34,15 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: EmailStr | None = None
+    phone: str | None = None
     password: str
+
+    @model_validator(mode='after')
+    def check_email_or_phone(self) -> 'UserLogin':
+        if not self.email and not self.phone:
+            raise ValueError('Either email or phone must be provided')
+        return self
 
 
 class UserRead(BaseModel):
@@ -351,6 +363,14 @@ class RiderRideRequest(BaseModel):
     arrived_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    pickup_lat: float | None = None
+    pickup_lng: float | None = None
+    destination_lat: float | None = None
+    destination_lng: float | None = None
+    start_otp: str | None = None
+    preference: RidePreferenceRead | None = None
     created_at: datetime
 
 
@@ -371,6 +391,11 @@ class RiderActiveRideRead(BaseModel):
     arrived_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    pickup_lat: float | None = None
+    pickup_lng: float | None = None
+    destination_lat: float | None = None
+    destination_lng: float | None = None
+    start_otp: str | None = None
     preference: RidePreferenceRead | None = None
     created_at: datetime
 
@@ -629,11 +654,14 @@ class PricingQuoteRead(BaseModel):
     destination_area: str
     vehicle_type: str
     estimated_distance_km: float
+    billable_distance_km: float | None = None
     suggested_fare: int
     min_fare: int
     max_fare: int
     demand_multiplier: float
     vehicle_multiplier: float
+    pricing_algorithm: str | None = None
+    service_profile: str | None = None
 
 
 class NearbyRiderRead(BaseModel):

@@ -116,6 +116,7 @@ async function riderRequest<T>(path: string, init: RequestInit = {}): Promise<T>
 export const riderApi = {
   listRequests: () => riderRequest<RiderRequest[]>(`${API_PREFIX}/requests`, { method: "GET" }),
   listActiveRides: () => riderRequest<RiderActiveRide[]>(`${API_PREFIX}/active`, { method: "GET" }),
+  listAllRides: () => riderRequest<RiderActiveRide[]>(`${API_PREFIX}/rides`, { method: "GET" }),
   acceptRequest: (rideId: string, agreed_fare?: number) =>
     riderRequest<RiderRequest>(`${API_PREFIX}/requests/${rideId}/accept`, {
       method: "POST",

@@ -72,9 +72,9 @@ export default function PriceNegotiationPage() {
                 pickup_location: pickup,
                 destination: destination,
                 vehicle_type: mappedVehicleType || "AUTO",
-                estimated_fare_min: minFare,
-                estimated_fare_max: maxFare,
-                requested_fare: offerPrice,
+                estimated_fare_min: Math.round(minFare),
+                estimated_fare_max: Math.round(maxFare),
+                requested_fare: Math.round(offerPrice),
             };
 
             if (pickupCoords) {
@@ -89,9 +89,12 @@ export default function PriceNegotiationPage() {
             const ride = await backendApi.createRide(
                 {
                     ...payload,
-                    metadata: {
-                        booking_mode: bookingPriority,
+                    preference: {
+                        trip_type: "oneway",
+                        urgency_type: "quick_book",
+                        ac_required: false,
                         vehicle_count: 1,
+                        booking_mode: bookingPriority,
                         market_rate: Math.round(offerPrice * 1.05)
                     },
                 },

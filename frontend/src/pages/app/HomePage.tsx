@@ -144,7 +144,9 @@ const HomePage = () => {
   }, []);
 
   const [pickup, setPickup] = useState(() => initialNegotiationContext?.pickup || localStorage.getItem("bmg_pickup") || "Varanasi");
+  const [pickupLandmark, setPickupLandmark] = useState("");
   const [destination, setDestination] = useState(() => initialNegotiationContext?.destination || localStorage.getItem("bmg_destination") || "");
+  const [destinationLandmark, setDestinationLandmark] = useState("");
   const [destinationCoords, setDestinationCoords] = useState<{lat: number, lng: number} | null>(() => initialNegotiationContext?.destinationCoords || null);
   const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
   const [isSearchingDest, setIsSearchingDest] = useState(false);
@@ -611,6 +613,13 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return Number(d.toFixed(1));
 };
 
+  useEffect(() => {
+    if (pickupCoords && destinationCoords && selectedDistance === null) {
+      const dist = calculateDistance(pickupCoords.lat, pickupCoords.lng, destinationCoords.lat, destinationCoords.lng);
+      setSelectedDistance(dist);
+    }
+  }, [pickupCoords, destinationCoords, selectedDistance]);
+
 const handleDestinationSearch = async (query: string) => {
   setDestination(query);
   setIsSearchingDest(true);
@@ -1007,7 +1016,14 @@ const handleDestinationSearch = async (query: string) => {
     if (activePickupResolveIdRef.current !== resolveId) return;
     const stableLabel = mergeStableLocationLabel(label, movedMeters);
     lastResolvedPickupLabelRef.current = stableLabel;
-    setPickup(stableLabel);
+    if (stableLabel && stableLabel.includes(',')) {
+      const parts = stableLabel.split(',');
+      setPickup(parts[0].trim());
+      setPickupLandmark(parts.slice(1).join(',').trim());
+    } else {
+      setPickup(stableLabel || "");
+      setPickupLandmark("");
+    }
   };
 
   const detectLiveLocation = async (silent = false, nativeRetryCount = 0) => {
@@ -1655,7 +1671,7 @@ const handleDestinationSearch = async (query: string) => {
              <p className={`font-bold uppercase tracking-[0.18em] text-emerald-500 flex items-center gap-1 group-hover:scale-105 transition-transform ${isInstantHomeLayout ? "mb-1 text-[10px]" : "mb-0.5 text-[10px]"}`}><MapPin size={isInstantHomeLayout ? 13 : 12} className="fill-emerald-500/20"/> My Location</p>
              <h2 className={`${isInstantHomeLayout ? "max-w-[255px] text-[15px] leading-[1.16]" : "max-w-[220px] text-sm"} whitespace-nowrap font-extrabold text-gray-900 truncate text-center ${isRefreshingPickupLocation || pickup === 'Fetching Live Location...' ? 'animate-pulse' : ''}`}>{pickup}</h2>
              {isInstantHomeLayout && (
-               <p className="mt-1 text-center text-[11px] font-medium text-slate-500">{pickupAccuracyLabel}</p>
+               <p className="mt-1 text-center text-[11px] font-medium text-slate-500">{pickupLandmark || pickupAccuracyLabel}</p>
              )}
           </motion.div>
   
@@ -1839,11 +1855,14 @@ const handleDestinationSearch = async (query: string) => {
                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-emerald-600">Pickup Point</p>
                          <input
                            value={pickup}
-                           onChange={(e) => setPickup(e.target.value)}
+                           onChange={(e) => {
+                             setPickup(e.target.value);
+                             setPickupLandmark("");
+                           }}
                            className={`w-full truncate whitespace-nowrap bg-transparent text-[16px] font-bold leading-[1.22] text-slate-900 outline-none placeholder:text-slate-400 ${themeTheme.focusRing}`}
                            placeholder="Fetching Live Location..."
                          />
-                         <p className="mt-1.5 text-[10px] font-medium text-slate-500">{pickupAccuracyLabel}</p>
+                         <p className="mt-1.5 text-[10px] font-medium text-slate-500">{pickupLandmark || pickupAccuracyLabel}</p>
                        </div>
                        <button
                          type="button"
@@ -1867,12 +1886,15 @@ const handleDestinationSearch = async (query: string) => {
                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-emerald-600">Destination</p>
                          <input
                            value={destination}
-                           onChange={(e) => handleDestinationSearch(e.target.value)}
+                           onChange={(e) => {
+                             handleDestinationSearch(e.target.value);
+                             setDestinationLandmark("");
+                           }}
                            className={`w-full truncate whitespace-nowrap bg-transparent text-[16px] font-bold leading-[1.22] text-slate-900 outline-none placeholder:text-slate-400 ${themeTheme.focusRing}`}
                            placeholder="Where to?"
                          />
                          <p className="mt-1.5 text-[10px] font-medium text-slate-500">
-                           {destinationSuggestions.length > 0 ? "Choose from search suggestions" : "Enter your destination"}
+                           {destinationLandmark || (destinationSuggestions.length > 0 ? "Choose from search suggestions" : "Enter your destination")}
                          </p>
                          {destinationSuggestions.length > 0 && destination && (
                            <div className="absolute bottom-full left-0 right-0 z-[100] mb-2 max-h-60 overflow-y-auto rounded-[22px] border border-slate-100 bg-white shadow-[0_-8px_32px_rgba(15,23,42,0.1)]">
@@ -1882,6 +1904,7 @@ const handleDestinationSearch = async (query: string) => {
                                  className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 transition-colors last:border-0 hover:bg-slate-50"
                                  onClick={() => {
                                    setDestination(item.primary_name);
+                                   setDestinationLandmark(item.secondary_name);
                                    setSelectedDistance(item.distance);
                                    setDestinationCoords({ lat: item.lat, lng: item.lon });
                                    setDestinationSuggestions([]);

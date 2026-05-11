@@ -97,13 +97,21 @@ export const reverseGeocodeWithGoogle = async (
 
   try {
     const res = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${GOOGLE_MAPS_API_KEY}`,
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${GOOGLE_MAPS_API_KEY}&result_type=street_address|route|intersection|political|point_of_interest|natural_feature|airport|park|premise|subpremise`,
       { signal },
     );
     if (!res.ok) return null;
     const data = await res.json();
     const first = data?.results?.[0];
     if (!first) return null;
+
+    if (first.formatted_address) {
+      const parts = first.formatted_address.split(',').map((s: string) => s.trim()).filter((s: string) => !s.includes('+') && !s.match(/^[A-Z0-9]{4}\+[A-Z0-9]{2}/));
+      if (parts.length >= 2) {
+         return parts.slice(0, 3).join(", ");
+      }
+    }
+
     const precise = buildPreciseGoogleLabel(first);
     if (precise) return precise;
     const formatted = formatGoogleResult(first);
@@ -132,6 +140,7 @@ export const formatPreciseReverseAddress = (
     addr.tourism,
     addr.leisure,
     addr.hamlet,
+    addr.village,
     addr.allotments,
     addr.neighbourhood,
     addr.suburb,
@@ -142,7 +151,6 @@ export const formatPreciseReverseAddress = (
     addr.city_district,
     addr.state_district,
     addr.county,
-    addr.village,
     addr.town,
     addr.city,
     data?.locality,
