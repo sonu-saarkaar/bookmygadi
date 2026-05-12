@@ -390,7 +390,14 @@ def seed_services() -> None:
 if settings.app_env.lower() != "production":
     seed_services()
 
-app = FastAPI(title=settings.app_name)
+if settings.app_env.lower() == "production":
+    app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, openapi_url=None)
+else:
+    app = FastAPI(title=settings.app_name)
+
+from app.core.telemetry import setup_telemetry
+setup_telemetry(app)
+
 logging.basicConfig(level=logging.INFO)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -414,13 +421,43 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         content={"success": False, "message": "Invalid request payload", "detail": exc.errors()}
     )
 
+_origins = [
+    "https://bookmygadi.app",
+    "https://www.bookmygadi.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+_env_origins = [o for o in settings.cors_origins if o != "*"]
+_final_origins = list(set(_origins + _env_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins + ["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_final_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    # Add a custom request ID to track logs securely
+    import uuid
+    response.headers["X-Request-ID"] = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    return response
+
+@app.middleware("http")
+async def cloudflare_real_ip_middleware(request: Request, call_next):
+    """Ensure rate-limiters and logs see the true client IP passed by Cloudflare CDN."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    # Only trust CF-Connecting-IP if the request comes from our local Nginx reverse proxy
+    if cf_ip and request.client and request.client.host in ("127.0.0.1", "::1"):
+        request.scope["client"] = (cf_ip, request.client.port)
+    return await call_next(request)
 
 _rate_buckets: dict[str, deque] = defaultdict(deque)
 _ws_rate_buckets: dict[str, deque] = defaultdict(deque)
