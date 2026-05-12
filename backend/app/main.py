@@ -395,6 +395,25 @@ logging.basicConfig(level=logging.INFO)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+
+@app.exception_handler(ValidationError)
+async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+    logging.error(f"Pydantic Validation Error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=422,
+        content={"success": False, "message": "Data validation error", "detail": "Internal schema mismatch"}
+    )
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    logging.error(f"Request Validation Error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=422,
+        content={"success": False, "message": "Invalid request payload", "detail": exc.errors()}
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins + ["http://localhost:5173", "http://127.0.0.1:5173"],

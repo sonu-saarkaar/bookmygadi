@@ -266,14 +266,17 @@ const ProfilePage = () => {
                 </AccordionItem>
 
                 <AccordionItem
-                  title="Privacy Policy"
+                  title="Privacy Policy & Data Deletion"
                   icon={Shield}
                   isOpen={openAccordion === 'privacy'}
                   onClick={() => setOpenAccordion(openAccordion === 'privacy' ? null : 'privacy')}
                 >
                   <p className="mb-2">Your privacy is important to us. BookMyGadi collects personal info such as name, contact details, and precise location data strictly for providing and improving our ride-hailing services.</p>
                   <p className="mb-2">We do not share your private data with third parties for marketing. All transactions are securely processed via certified providers.</p>
-                  <p>For data deletion requests, please contact our support team directly. By using this service, you consent to our comprehensive policy guidelines.</p>
+                  <p className="mb-3">For full details and data deletion requests, please review our comprehensive policy.</p>
+                  <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs inline-block border border-emerald-100">
+                    Read Full Privacy Policy
+                  </a>
                 </AccordionItem>
                 
                 <AccordionItem

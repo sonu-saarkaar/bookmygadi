@@ -153,7 +153,7 @@ class RideRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    booking_display_id: str
+    booking_display_id: str | None = None
     customer_id: str
     driver_id: str | None = None
     driver_name: str | None = None
@@ -347,7 +347,7 @@ class RiderRideRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    booking_display_id: str
+    booking_display_id: str | None = None
     pickup_location: str
     destination: str
     vehicle_type: str
@@ -376,7 +376,7 @@ class RiderRideRequest(BaseModel):
 
 class RiderActiveRideRead(BaseModel):
     id: str
-    booking_display_id: str
+    booking_display_id: str | None = None
     pickup_location: str
     destination: str
     vehicle_type: str

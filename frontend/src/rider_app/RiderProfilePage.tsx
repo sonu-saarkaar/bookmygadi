@@ -444,6 +444,19 @@ const RiderProfilePage = () => {
                 </AccordionItem>
 
                 <AccordionItem
+                  title="Privacy Policy & Data Deletion"
+                  icon={Shield}
+                  isOpen={openAccordion === 'privacy'}
+                  onClick={() => setOpenAccordion(openAccordion === 'privacy' ? null : 'privacy')}
+                >
+                  <p className="mb-2">We collect background location data even when the app is closed to assign rides and ensure your safety.</p>
+                  <p className="mb-3">To review data usage or request account deletion, please read our full policy.</p>
+                  <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs inline-block border border-emerald-100">
+                    Read Full Privacy Policy
+                  </a>
+                </AccordionItem>
+
+                <AccordionItem
                   title="Help & Partner Support"
                   icon={Info}
                   isOpen={openAccordion === 'support'}

@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.core.utils import generate_booking_display_id
 
 
 DISTRICT_CODE_MAP = {
@@ -163,22 +164,25 @@ class Ride(Base, TimestampMixin):
 
     @property
     def booking_display_id(self) -> str:
-        urgency = ((self.preference.urgency_type if self.preference else None) or "").lower()
-        vehicle_model = (self.preference.vehicle_model if self.preference else None) or ""
-        district_source = (
-            (self.preference.pickup_area if self.preference else None)
-            or self.pickup_location
-            or (self.customer.city if self.customer else None)
-        )
-        district_code = _district_code_from_text(district_source)
-        random_part = f"A{sum(ord(ch) for ch in self.id if ch.isalnum()) % 10000:04d}"
+        try:
+            urgency = ((self.preference.urgency_type if getattr(self, "preference", None) else None) or "").lower()
+            vehicle_model = (self.preference.vehicle_model if getattr(self, "preference", None) else None) or ""
+            district_source = (
+                (self.preference.pickup_area if getattr(self, "preference", None) else None)
+                or getattr(self, "pickup_location", None)
+                or (self.customer.city if getattr(self, "customer", None) else None)
+            )
+            district_code = _district_code_from_text(district_source)
+            random_part = f"A{sum(ord(ch) for ch in str(self.id) if ch.isalnum()) % 10000:04d}"
 
-        if urgency == "reserve":
-            middle = f"R{_reserve_category_code(vehicle_model)}"
-        else:
-            middle = f"I{_vehicle_code(self.vehicle_type or vehicle_model)}"
+            if urgency == "reserve":
+                middle = f"R{_reserve_category_code(vehicle_model)}"
+            else:
+                middle = f"I{_vehicle_code(self.vehicle_type or vehicle_model)}"
 
-        return f"BMG{middle}{district_code}{random_part}"
+            return f"BMG{middle}{district_code}{random_part}"
+        except (AttributeError, TypeError):
+            return generate_booking_display_id(str(self.id))
 
 
 class RidePreference(Base, TimestampMixin):
