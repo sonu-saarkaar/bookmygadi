@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 
 type RiderPaymentSummary = {
   rideId: string;
+  bookingDisplayId?: string | null;
+  paymentPublicId?: string | null;
   pickup: string;
   destination: string;
   vehicleType: string;
@@ -18,8 +20,11 @@ type RiderPaymentSummary = {
 const PAYEE_UPI_ID = "bookmygadi@upi";
 const PAYEE_NAME = "BookMyGaadi";
 
-const buildUpiUri = (amount: number, rideId: string) => {
-  const note = encodeURIComponent(`BookMyGaadi ride ${rideId.slice(-6).toUpperCase()}`);
+const rideLabel = (summary: Pick<RiderPaymentSummary, "rideId" | "bookingDisplayId">) =>
+  summary.bookingDisplayId || `BMG${summary.rideId.slice(-6).toUpperCase()}`;
+
+const buildUpiUri = (amount: number, label: string) => {
+  const note = encodeURIComponent(`BookMyGaadi ride ${label}`);
   return `upi://pay?pa=${encodeURIComponent(PAYEE_UPI_ID)}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${amount.toFixed(2)}&cu=INR&tn=${note}`;
 };
 
@@ -27,7 +32,7 @@ const buildQrImageUrl = (value: string) =>
    `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(value)}`;
 
 const buildCustomerPaymentMessage = (summary: RiderPaymentSummary, upiUri: string) => {
-   const rideCode = `BMG${summary.rideId.slice(-6).toUpperCase()}`;
+   const rideCode = rideLabel(summary);
    const amount = new Intl.NumberFormat("en-IN").format(summary.fare || 31);
    return [
       `BookMyGaadi Payment Request`,
@@ -70,7 +75,7 @@ const RiderPaymentPage = () => {
     };
   }, [location.state, rideId]);
 
-   const upiUri = useMemo(() => buildUpiUri(summary.fare || 31, summary.rideId || rideId), [rideId, summary.fare, summary.rideId]);
+   const upiUri = useMemo(() => buildUpiUri(summary.fare || 31, rideLabel(summary)), [summary]);
    const qrImageUrl = useMemo(() => buildQrImageUrl(upiUri), [upiUri]);
 
    const sendPaymentLinkToCustomer = async () => {
@@ -186,7 +191,8 @@ const RiderPaymentPage = () => {
             <div className="relative mt-5 grid grid-cols-2 gap-3">
                <div className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3">
                   <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Ride ID</p>
-                  <p className="mt-1 text-sm font-black">BMG{summary.rideId.slice(-6).toUpperCase()}</p>
+                  <p className="mt-1 text-sm font-black">{rideLabel(summary)}</p>
+                  {summary.paymentPublicId && <p className="mt-1 text-[10px] font-bold text-emerald-200">{summary.paymentPublicId}</p>}
                </div>
                <div className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3 text-right">
                   <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Amount</p>

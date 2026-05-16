@@ -49,6 +49,7 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    public_id: str | None = None
     name: str
     email: EmailStr
     phone: str | None = None
@@ -153,7 +154,10 @@ class RideRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    public_id: str | None = None
     booking_display_id: str | None = None
+    payment_public_id: str | None = None
+    payment_display_id: str | None = None
     customer_id: str
     driver_id: str | None = None
     driver_name: str | None = None
@@ -300,6 +304,7 @@ class LocationUpdate(BaseModel):
 
 class RideTrackingRead(BaseModel):
     ride_id: str
+    booking_display_id: str | None = None
     status: str
     pickup_location: str
     destination: str
@@ -321,6 +326,7 @@ class RideTrackingRead(BaseModel):
 
 class PaymentReceiveRead(BaseModel):
     ride_id: str
+    payment_public_id: str | None = None
     payment_status: str
     status: str
 
@@ -347,7 +353,9 @@ class RiderRideRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    public_id: str | None = None
     booking_display_id: str | None = None
+    payment_public_id: str | None = None
     pickup_location: str
     destination: str
     vehicle_type: str
@@ -376,7 +384,9 @@ class RiderRideRequest(BaseModel):
 
 class RiderActiveRideRead(BaseModel):
     id: str
+    public_id: str | None = None
     booking_display_id: str | None = None
+    payment_public_id: str | None = None
     pickup_location: str
     destination: str
     vehicle_type: str
@@ -779,6 +789,7 @@ class RiderVehicleRegistrationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    request_public_id: str | None = None
     driver_id: str
     vehicle_type: str
     brand_model: str
@@ -860,11 +871,16 @@ class AdminAreaLoadRead(BaseModel):
 
 class AdminRideOpsRead(BaseModel):
     id: str
+    public_id: str | None = None
+    booking_display_id: str | None = None
+    payment_public_id: str | None = None
     customer_id: str
+    customer_public_id: str | None = None
     customer_name: str | None = None
     customer_phone: str | None = None
     customer_email: str | None = None
     driver_id: str | None = None
+    driver_public_id: str | None = None
     driver_name: str | None = None
     driver_phone: str | None = None
     pickup_location: str
@@ -884,6 +900,7 @@ class AdminRideOpsRead(BaseModel):
 
 class AdminUserOpsRead(BaseModel):
     id: str
+    public_id: str | None = None
     name: str
     email: EmailStr
     phone: str | None = None

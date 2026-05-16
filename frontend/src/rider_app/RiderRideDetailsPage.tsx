@@ -367,6 +367,8 @@ const RiderRideDetailsPage = () => {
       if (status === "completed") {
          const paymentSummary = {
             rideId: updated.id,
+            bookingDisplayId: updated.booking_display_id,
+            paymentPublicId: updated.payment_public_id,
             pickup: updated.pickup_location,
             destination: updated.destination,
             vehicleType: updated.vehicle_type,

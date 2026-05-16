@@ -181,6 +181,7 @@ export const LiveRidesBoard = () => {
                 <p className="font-bold text-slate-800 text-sm">{r.rider_name || r.customer_name || 'Customer'}</p>
                 <Chip text={r.status || 'pending'} tone={r.status === 'pending' ? 'warning' : r.status === 'completed' ? 'success' : 'info'} />
               </div>
+              <p className="text-[11px] font-black uppercase text-emerald-600">{r.booking_display_id || r.public_id || `BMG${String(r.id).slice(-6).toUpperCase()}`}</p>
               <div className="text-xs text-slate-500 flex items-center gap-1 mt-2">
                 <MapPin size={12} className="text-green-500"/>
                 <span className="truncate w-full">{r.pickup_location || r.pickup || '-'}</span>
@@ -205,9 +206,10 @@ export const LiveRidesBoard = () => {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <h2 className="text-xl font-bold text-slate-800">Ride #{rideDetails.id.slice(-6).toUpperCase()}</h2>
+                    <h2 className="text-xl font-bold text-slate-800">{rideDetails.booking_display_id || rideDetails.public_id || `BMG${rideDetails.id.slice(-6).toUpperCase()}`}</h2>
                     <Chip text={rideDetails.status} tone={rideDetails.status === 'completed' ? 'success' : 'warning'} />
                   </div>
+                  {rideDetails.payment_public_id && <p className="text-xs font-bold text-blue-600">Payment ID: {rideDetails.payment_public_id}</p>}
                   <p className="text-sm text-slate-500">Customer: <span className="font-semibold text-slate-700">{rideDetails.customer?.name || 'Guest'}</span> ({rideDetails.customer?.phone || '-'})</p>
                   <p className="text-sm text-slate-500">Driver: <span className="font-semibold text-slate-700">{rideDetails.driver?.name || 'Unassigned'}</span> ({rideDetails.driver?.phone || '-'})</p>
                 </div>

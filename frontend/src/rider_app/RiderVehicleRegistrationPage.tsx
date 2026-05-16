@@ -73,7 +73,7 @@ export default function RiderVehicleRegistrationPage() {
     }
     
     try {
-      await backendApi.createRiderVehicleRegistration({
+      const created = await backendApi.createRiderVehicleRegistration({
          vehicle_category: form.vehicle_category,
          vehicle_type: form.vehicle_type,
          service_type: form.service_type,
@@ -99,7 +99,7 @@ export default function RiderVehicleRegistrationPage() {
          insurance_number: null,
       }, token);
       
-      setNotice("Your Gadi details have been submitted. Once approved by Admin, you will get your 'BMG' Rider ID.");
+      setNotice(`Submitted. Request ID: ${created.request_public_id || created.id}. Rider ID: ${created.rider_id_format || "Pending"}.`);
       setTimeout(() => {
          navigate("/rider/home");
       }, 3000);

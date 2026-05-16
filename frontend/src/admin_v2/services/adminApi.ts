@@ -64,6 +64,9 @@ const buildAdminEmailCandidates = (email: string) => {
 function mapRideToOps(row: any) {
   return {
     id: row.id,
+    public_id: row.public_id,
+    booking_display_id: row.booking_display_id || row.public_id,
+    payment_public_id: row.payment_public_id,
     rider_name: row.customer_name || "-",
     pickup: row.pickup_location || "-",
     drop: row.destination || "-",
@@ -77,6 +80,7 @@ function mapRideToOps(row: any) {
 
 export interface RiderRegistrationItem {
   id: string;
+  request_public_id?: string | null;
   driver_id: string;
   rider_id_format?: string | null;
   vehicle_category?: string | null;
@@ -85,12 +89,18 @@ export interface RiderRegistrationItem {
   brand_model: string;
   registration_number: string;
   color?: string | null;
+  seater_count?: number | null;
+  vehicle_condition?: string | null;
+  rc_number?: string | null;
+  insurance_number?: string | null;
+  notes?: string | null;
   model_year?: string | null;
   has_ac?: boolean | null;
   has_music?: boolean | null;
   owner_name?: string | null;
   owner_phone?: string | null;
   owner_email?: string | null;
+  owner_address?: string | null;
   is_owner_driver?: boolean | null;
   driver_name?: string | null;
   driver_number?: string | null;
@@ -99,7 +109,9 @@ export interface RiderRegistrationItem {
   area?: string | null;
   status: string;
   admin_note?: string | null;
+  approved_by?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export const adminV2Api = {
@@ -161,6 +173,7 @@ export const adminV2Api = {
   getKpis: async () => {
     const d = await requestV1<any>("/admin/dashboard");
     return {
+      ...d,
       total_riders: d.total_customers ?? 0,
       total_drivers: d.total_riders ?? 0,
       active_rides: d.rides_active ?? 0,
@@ -204,7 +217,8 @@ export const adminV2Api = {
   postRideMessage: (id: string, message: string) => requestV1<any>(`/rides/${id}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
   createSupportTicket: (ride_id: string, payload: any) => requestV1<any>(`/rides/${ride_id}/support-ticket`, { method: "POST", body: JSON.stringify(payload) }),
   updateRideStatus: (id: string, status: string) => requestV1<any>(`/rides/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
-  assignRideDriver: (id: string, driver_id: string) => requestV1<any>(`/rides/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: "accepted", driver_id }) }),
+  assignRideDriver: (id: string, driver_id: string) =>
+    requestV1<any>(`/admin/rides/${id}/assign-driver`, { method: "PATCH", body: JSON.stringify({ driver_id }) }),
 
   listApprovals: async () => {
     const rows = await requestV1<RiderRegistrationItem[]>("/vehicles/rider-registrations?status=pending");
@@ -228,9 +242,9 @@ export const adminV2Api = {
   financeOverview: async () => {
     const rides = await requestV1<any[]>("/admin/rides?limit=300");
     const rows = rides.map((r) => ({
-      id: r.id,
-      ride_id: r.id,
-      driver_id: r.driver_id || "unassigned",
+      id: r.payment_public_id || r.id,
+      ride_id: r.booking_display_id || r.public_id || r.id,
+      driver_id: r.driver_public_id || r.driver_id || "unassigned",
       amount: r.agreed_fare ?? r.requested_fare ?? r.estimated_fare_max ?? 0,
       method: "cash",
       status: (r.payment_status || "unpaid").toLowerCase() === "paid" ? "paid" : "pending",
@@ -245,6 +259,8 @@ export const adminV2Api = {
   updateTaskStatus: (id: string, status: string) => requestV1<any>(`/admin/tasks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
   logs: () => requestV1<any[]>("/admin/logs"),
+  listManagedUsers: () => requestV1<any[]>("/users-mgmt/list"),
+  userDashboard: () => requestV1<any>("/users-mgmt/dashboard"),
 
   // Support Tickets
   listTickets: (filters?: { status?: string; category?: string; severity?: string }) => {
@@ -330,5 +346,99 @@ export const adminV2Api = {
   getDispatchControl: () => requestV1<any>("/admin/enterprise/dispatch-control"),
   updateDispatchControl: (mode: "auto" | "manual" | "hybrid", notes?: string) =>
     requestV1<any>("/admin/enterprise/dispatch-control", { method: "PUT", body: JSON.stringify({ mode, notes }) }),
+
+  // Finance & Settlements
+  getFinanceDashboard: async () => {
+    try {
+      return await requestV1<any>("/admin/finance/dashboard");
+    } catch {
+      // Fallback: aggregate from rides if endpoint not available
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayRides = rides.filter(r => new Date(r.created_at) >= today && (r.status || "").toLowerCase() === "completed");
+      const todayRevenue = todayRides.reduce((sum, r) => sum + (Number(r.agreed_fare) || 0), 0);
+      const paidCount = todayRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length;
+      const pendingCount = todayRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").length;
+
+      return {
+        today: { rides: todayRides.length, revenue: todayRevenue, paid: paidCount, pending: pendingCount },
+        week: { rides: rides.length, revenue: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) },
+        month: { rides: rides.length, revenue: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) }
+      };
+    }
+  },
+
+  getDriverWallets: async () => {
+    try {
+      return await requestV1<any[]>("/admin/finance/driver-wallets");
+    } catch {
+      // Fallback: aggregate from drivers
+      const drivers = await requestV1<any[]>("/admin/drivers");
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      return drivers.map(d => {
+        const driverRides = rides.filter(r => r.driver_id === d.id);
+        const totalEarned = driverRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0);
+        const pendingSettlement = driverRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0);
+        return { driver_id: d.id, name: d.name, balance: totalEarned, pending_settlement: pendingSettlement, total_earned: totalEarned, rides_count: driverRides.length };
+      });
+    }
+  },
+
+  getDriverEarnings: (driverId: string) => requestV1<any[]>(`/driver/${driverId}/earnings`),
+
+  getSettlementQueue: async () => {
+    try {
+      return await requestV1<any[]>("/admin/finance/settlement-queue");
+    } catch {
+      // Fallback: get drivers with pending settlements
+      const wallets = await adminV2Api.getDriverWallets();
+      return wallets.filter((w: any) => w.pending_settlement > 0).sort((a: any, b: any) => b.pending_settlement - a.pending_settlement);
+    }
+  },
+
+  processSettlement: (driverId: string, amount: number) =>
+    requestV1<any>("/admin/finance/settlement", {
+      method: "POST",
+      body: JSON.stringify({ driver_id: driverId, amount })
+    }),
+
+  getDailyMetrics: async () => {
+    try {
+      return await requestV1<any>("/admin/metrics/daily");
+    } catch {
+      // Fallback: calculate from rides
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayRides = rides.filter(r => new Date(r.created_at) >= today);
+      const completedRides = todayRides.filter(r => (r.status || "").toLowerCase() === "completed");
+      return {
+        date: today.toISOString().split('T')[0],
+        total_rides: todayRides.length,
+        completed_rides: completedRides.length,
+        revenue: completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0),
+        average_fare: completedRides.length > 0 ? completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) / completedRides.length : 0,
+        paid: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length,
+        pending: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").length
+      };
+    }
+  },
+
+  getFinanceReports: async (dateRange?: { start: string; end: string }) => {
+    try {
+      const params = new URLSearchParams();
+      if (dateRange) {
+        params.append("start", dateRange.start);
+        params.append("end", dateRange.end);
+      }
+      return await requestV1<any>(`/admin/reports/finance${params.toString() ? "?" + params.toString() : ""}`);
+    } catch {
+      // Fallback: basic aggregation
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      return { rides_total: rides.length, revenue_total: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0), data: [] };
+    }
+  },
+
   requestV1: <T>(path: string, init?: RequestInit) => requestV1<T>(path, init),
 };

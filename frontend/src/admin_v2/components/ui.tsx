@@ -11,11 +11,25 @@ export const Card = ({ children, className = "" }: { children: ReactNode; classN
   </motion.section>
 );
 
-export const Button = ({ children, className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
-  <button {...props} className={cn("h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60", className)}>
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "default" | "outline" | "solid" | "danger" | "ghost";
+};
+
+export const Button = ({ children, className = "", variant = "default", ...props }: ButtonProps) => {
+  const variants: Record<NonNullable<ButtonProps["variant"]>, string> = {
+    default: "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+    outline: "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+    solid: "border-slate-900 bg-slate-900 text-white hover:bg-slate-800",
+    danger: "border-rose-600 bg-rose-600 text-white hover:bg-rose-700",
+    ghost: "border-transparent bg-transparent text-slate-600 hover:bg-slate-100",
+  };
+
+  return (
+  <button {...props} className={cn("h-9 rounded-lg border px-3 text-sm font-semibold disabled:opacity-60", variants[variant], className)}>
     {children}
   </button>
-);
+  );
+};
 
 export const Chip = ({ text, tone = "neutral" }: { text: string; tone?: "neutral" | "success" | "warning" | "danger" | "info" }) => {
   const map: Record<string, string> = {
@@ -28,7 +42,7 @@ export const Chip = ({ text, tone = "neutral" }: { text: string; tone?: "neutral
   return <span className={cn("rounded-full border px-2 py-0.5 text-xs font-semibold", map[tone])}>{text}</span>;
 };
 
-export const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean; onClose: () => void; title?: string; children: ReactNode }) => {
+export const Modal = ({ isOpen = true, onClose, title, children }: { isOpen?: boolean; onClose: () => void; title?: string; children: ReactNode }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>

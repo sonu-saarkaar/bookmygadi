@@ -36,9 +36,10 @@ from app.pricing_engine.routes import router as pricing_engine_router
 from app.admin_system.middlewares import AdminAuditMiddleware, SecureUploadMiddleware
 from app.core.config import settings
 from app.core.db_backup import create_sqlite_backup
+from app.core.ids import next_request_public_id, next_ride_public_id, next_rider_public_id, next_search_public_id, next_user_public_id, public_payment_id
 from app.core.security import decode_access_token, get_password_hash
 from app.db import Base, engine
-from app.models import Ride, User, VehicleInventory
+from app.models import Ride, RideSearchEvent, RiderVehicleRegistration, User, VehicleInventory
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -87,6 +88,10 @@ def ensure_schema_updates() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN customer_live_updated_at DATETIME"))
         if ride_cols and "requested_fare" not in ride_col_names:
             conn.execute(text("ALTER TABLE rides ADD COLUMN requested_fare INTEGER"))
+        if ride_cols and "public_id" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN public_id VARCHAR(30)"))
+        if ride_cols and "payment_public_id" not in ride_col_names:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN payment_public_id VARCHAR(30)"))
 
         pref_cols = conn.execute(text("PRAGMA table_info(ride_preferences)")).fetchall()
         pref_col_names = {row[1] for row in pref_cols}
@@ -125,6 +130,16 @@ def ensure_schema_updates() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN driver_status VARCHAR"))
         if user_cols and "public_id" not in user_col_names:
             conn.execute(text("ALTER TABLE users ADD COLUMN public_id VARCHAR(30)"))
+
+        reg_cols = conn.execute(text("PRAGMA table_info(rider_vehicle_registrations)")).fetchall()
+        reg_col_names = {row[1] for row in reg_cols}
+        if reg_cols and "request_public_id" not in reg_col_names:
+            conn.execute(text("ALTER TABLE rider_vehicle_registrations ADD COLUMN request_public_id VARCHAR(30)"))
+
+        search_cols = conn.execute(text("PRAGMA table_info(ride_search_events)")).fetchall()
+        search_col_names = {row[1] for row in search_cols}
+        if search_cols and "public_id" not in search_col_names:
+            conn.execute(text("ALTER TABLE ride_search_events ADD COLUMN public_id VARCHAR(30)"))
 
         # Create service_metadata if not exists
         conn.execute(text("""
@@ -183,13 +198,53 @@ def ensure_performance_indexes() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_status_created ON rides (status, created_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_driver_status ON rides (driver_id, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_customer_created ON rides (customer_id, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rides_public_id ON rides (public_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_public_id ON users (public_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rider_vehicle_registrations_request_public_id ON rider_vehicle_registrations (request_public_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ride_search_events_status_started ON ride_search_events (status, search_started_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ride_search_events_public_id ON ride_search_events (public_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role_driver_status ON users (role, driver_status)"))
 
 
 ensure_schema_updates()
 ensure_reserve_price_columns()
 ensure_performance_indexes()
+
+
+def backfill_public_ids() -> None:
+    with Session(engine) as db:
+        changed = False
+        for user in db.query(User).order_by(User.created_at.asc()).all():
+            if not user.public_id or str(user.public_id).startswith("BMG-"):
+                user.public_id = next_user_public_id(db, User)
+                changed = True
+
+        for registration in db.query(RiderVehicleRegistration).order_by(RiderVehicleRegistration.created_at.asc()).all():
+            if not registration.request_public_id:
+                registration.request_public_id = next_request_public_id(db, RiderVehicleRegistration)
+                changed = True
+            if not registration.rider_id_format or not str(registration.rider_id_format).startswith("BMGR"):
+                registration.rider_id_format = next_rider_public_id(db, RiderVehicleRegistration, registration.area)
+                changed = True
+
+        for ride in db.query(Ride).order_by(Ride.created_at.asc()).all():
+            if not ride.public_id:
+                ride.public_id = next_ride_public_id(db, Ride)
+                changed = True
+            if not ride.payment_public_id:
+                ride.payment_public_id = public_payment_id(ride.public_id)
+                changed = True
+
+        for event in db.query(RideSearchEvent).order_by(RideSearchEvent.created_at.asc()).all():
+            if not event.public_id or str(event.public_id).startswith("BMGRQ"):
+                event.public_id = next_search_public_id(db, RideSearchEvent)
+                changed = True
+
+        if changed:
+            db.commit()
+
+
+backfill_public_ids()
 
 
 def seed_demo_users() -> None:
@@ -246,37 +301,9 @@ def seed_demo_users() -> None:
             )
             db.commit()
 
-        # Generate stable platform IDs (BMG-USER/BMG-RIDER/BMG-ADMIN).
-        users = db.query(User).order_by(User.created_at.asc()).all()
-        counters = {"customer": 0, "driver": 0, "admin": 0}
-        existing_ids = {u.public_id for u in users if u.public_id}
-        for pid in existing_ids:
-            try:
-                part = str(pid).split("-")
-                if len(part) != 3:
-                    continue
-                kind, num = part[1], int(part[2])
-                if kind == "USER":
-                    counters["customer"] = max(counters["customer"], num)
-                elif kind == "RIDER":
-                    counters["driver"] = max(counters["driver"], num)
-                elif kind == "ADMIN":
-                    counters["admin"] = max(counters["admin"], num)
-            except Exception:
-                continue
-        for u in users:
-            if u.role not in counters:
-                continue
-            if u.public_id:
-                continue
-            counters[u.role] += 1
-            prefix = "USER" if u.role == "customer" else "RIDER" if u.role == "driver" else "ADMIN"
-            candidate = f"BMG-{prefix}-{counters[u.role]:03d}"
-            while candidate in existing_ids:
-                counters[u.role] += 1
-                candidate = f"BMG-{prefix}-{counters[u.role]:03d}"
-            u.public_id = candidate
-            existing_ids.add(candidate)
+        for u in db.query(User).order_by(User.created_at.asc()).all():
+            if not u.public_id or str(u.public_id).startswith("BMG-"):
+                u.public_id = next_user_public_id(db, User)
         db.commit()
 
 

@@ -7,7 +7,9 @@ const EMBEDDED_RIDER_API_KEY = import.meta.env.VITE_RIDER_APP_API_KEY || "rider_
 
 export interface RiderRequest {
   id: string;
+  public_id?: string | null;
   booking_display_id: string;
+  payment_public_id?: string | null;
   pickup_location: string;
   destination: string;
   vehicle_type: string;
@@ -32,7 +34,9 @@ export interface RiderRequest {
 
 export interface RiderActiveRide {
   id: string;
+  public_id?: string | null;
   booking_display_id: string;
+  payment_public_id?: string | null;
   pickup_location: string;
   destination: string;
   vehicle_type: string;
@@ -56,6 +60,7 @@ export interface RiderActiveRide {
 
 export interface RiderTracking {
   ride_id: string;
+  booking_display_id?: string | null;
   status: string;
   pickup_location: string;
   destination: string;

@@ -15,6 +15,15 @@ const menuGroups = [
     ],
   },
   {
+    title: "Finance & Settlements",
+    items: [
+      { key: "finance-dashboard", label: "Finance Dashboard", icon: Lucide.BarChart3 },
+      { key: "finance-settlement", label: "Settlement Management", icon: Lucide.Wallet },
+      { key: "earnings-report", label: "Daily Earnings", icon: Lucide.TrendingUp },
+      { key: "finance", label: "Payments", icon: Lucide.CreditCard },
+    ],
+  },
+  {
     title: "User Panel",
     items: [
       { key: "users-mgmt", label: "User Management System", icon: Lucide.Users },
@@ -39,7 +48,6 @@ const menuGroups = [
   {
     title: "System Control",
     items: [
-      { key: "finance", label: "Finance", icon: Lucide.IndianRupee },
       { key: "policies", label: "Policy Management", icon: Lucide.FileText },
       { key: "logs", label: "System Logs", icon: Lucide.History },
     ],

@@ -13,6 +13,7 @@ export interface AuthToken {
 
 export interface UserProfile {
   id: string;
+  public_id?: string | null;
   name: string;
   email: string;
   phone?: string | null;
@@ -60,7 +61,9 @@ export interface DriverVehicleDetails {
 
 export interface Ride {
   id: string;
+  public_id?: string | null;
   booking_display_id: string;
+  payment_public_id?: string | null;
   customer_id: string;
   driver_id?: string | null;
   driver_name?: string | null;
@@ -287,6 +290,7 @@ export interface VehiclePriceModifier {
 
 export interface RiderVehicleRegistration {
   id: string;
+  request_public_id?: string | null;
   driver_id: string;
   vehicle_type: string;
   brand_model: string;

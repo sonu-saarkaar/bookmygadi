@@ -3,6 +3,7 @@ import { type RiderRegistrationItem, adminV2Api } from "@/admin_v2/services/admi
 import { Button, Card, Chip, Modal } from "@/admin_v2/components/ui";
 import { useAdminV2Store } from "@/admin_v2/store/useAdminStore";
 import * as Lucide from "lucide-react";
+import { RiderProfileDashboard } from "./RiderProfileDashboard";
 
 const COLUMNS = [
   { id: "NEW", label: "New Requests", tone: "info" as const },
@@ -14,6 +15,7 @@ const COLUMNS = [
 
 type DriverRow = {
   id: string;
+  public_id?: string;
   name?: string;
   phone?: string;
   city?: string;
@@ -24,6 +26,7 @@ type DriverRow = {
 type BoardDriver = {
   id: string;
   driverId: string;
+  driverPublicId?: string;
   registrationId?: string;
   name: string;
   phone: string;
@@ -68,6 +71,7 @@ const formatBoardDrivers = (drivers: DriverRow[], registrations: RiderRegistrati
     return {
       id: registration?.id || driver.id,
       driverId: driver.id,
+      driverPublicId: driver.public_id,
       registrationId: registration?.id,
       name: registration?.driver_name || driver.name || "Unnamed Rider",
       phone: registration?.driver_number || driver.phone || "-",
@@ -102,6 +106,7 @@ const formatBoardDrivers = (drivers: DriverRow[], registrations: RiderRegistrati
     .map((registration) => ({
       id: registration.id,
       driverId: registration.driver_id,
+      driverPublicId: undefined,
       registrationId: registration.id,
       name: registration.driver_name || registration.owner_name || "Unnamed Rider",
       phone: registration.driver_number || registration.owner_phone || "-",
@@ -173,6 +178,7 @@ export const RiderManagementBoard = ({ drivers, registrations, onRefresh }: Ride
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [blockDriverId, setBlockDriverId] = useState("");
   const [blockReason, setBlockReason] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
   const boardDrivers = useMemo(() => formatBoardDrivers(drivers, registrations), [drivers, registrations]);
@@ -186,16 +192,18 @@ export const RiderManagementBoard = ({ drivers, registrations, onRefresh }: Ride
   }), [boardDrivers]);
 
   const filteredDrivers = useMemo(() => {
-    if (!searchQ.trim()) return boardDrivers;
-    const q = searchQ.trim().toLowerCase();
-    return boardDrivers.filter((row) =>
-      row.name.toLowerCase().includes(q) ||
-      row.phone.toLowerCase().includes(q) ||
-      row.registrationNumber.toLowerCase().includes(q) ||
-      row.brandModel.toLowerCase().includes(q) ||
-      row.riderIdFormat.toLowerCase().includes(q),
-    );
-  }, [boardDrivers, searchQ]);
+    return boardDrivers.filter((row) => {
+      const matchesQ = !searchQ.trim() || 
+        row.name.toLowerCase().includes(searchQ.trim().toLowerCase()) ||
+        row.phone.toLowerCase().includes(searchQ.trim().toLowerCase()) ||
+        row.registrationNumber.toLowerCase().includes(searchQ.trim().toLowerCase()) ||
+        row.brandModel.toLowerCase().includes(searchQ.trim().toLowerCase()) ||
+        row.riderIdFormat.toLowerCase().includes(searchQ.trim().toLowerCase());
+        
+      const matchesS = !statusFilter || row.status === statusFilter;
+      return matchesQ && matchesS;
+    });
+  }, [boardDrivers, searchQ, statusFilter]);
 
   const exportCsv = () => {
     downloadTextFile("bookmygadi-riders.csv", toCsv(filteredDrivers), "text/csv;charset=utf-8;");
@@ -295,23 +303,13 @@ export const RiderManagementBoard = ({ drivers, registrations, onRefresh }: Ride
           <p className="text-sm text-slate-500">Registry, Fleet, Verifications, and Pipeline</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <div className="relative">
-            <Lucide.Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input
-              type="text"
-              placeholder="Search riders by name, phone, RC..."
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              className="w-64 rounded-lg border border-slate-300 py-2 pl-9 pr-4 text-sm outline-none focus:border-emerald-500"
-            />
-          </div>
           <Button variant="outline" onClick={exportCsv}>Export CSV</Button>
           <Button variant="outline" onClick={exportExcel}>Export Excel</Button>
           <Button onClick={refreshBoard} disabled={isUpdating}>Refresh</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Card className="border-l-4 border-l-blue-500 bg-white p-4 shadow-sm">
           <p className="text-xs font-semibold uppercase text-slate-500">Total Riders</p>
           <p className="mt-1 text-2xl font-bold">{analytics.total}</p>
@@ -334,75 +332,90 @@ export const RiderManagementBoard = ({ drivers, registrations, onRefresh }: Ride
         </Card>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 pt-2">
-        {COLUMNS.map((column) => {
-          const columnDrivers = filteredDrivers.filter((row) => row.status === column.id);
-          return (
-            <div
-              key={column.id}
-              className="flex h-[calc(100vh-320px)] w-80 flex-shrink-0 flex-col rounded-xl bg-slate-200/50 p-3"
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, column.id)}
-            >
-              <div className="mb-3 flex items-center justify-between px-1">
-                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">{column.label}</h3>
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-600 shadow-sm">{columnDrivers.length}</span>
-              </div>
-              <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-                {columnDrivers.map((driver) => (
-                  <div
-                    key={driver.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, driver.driverId)}
-                    onClick={() => setSelectedRider(driver)}
-                    className="cursor-grab rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-emerald-400 active:cursor-grabbing"
-                  >
-                    <div className="mb-2 flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">{driver.name}</p>
-                        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{driver.riderIdFormat !== "-" ? driver.riderIdFormat : "Driver Registry"}</p>
-                      </div>
-                      <Chip text={driver.vehicleType} tone="neutral" />
+      <Card className="bg-white overflow-hidden p-0 shadow-sm border border-slate-200">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1 min-w-0 max-w-sm">
+            <Lucide.Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="Search riders by name, phone, RC..." 
+              value={searchQ}
+              onChange={e => setSearchQ(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:border-emerald-500"
+            />
+          </div>
+          <select 
+            value={statusFilter} 
+            onChange={e => setStatusFilter(e.target.value)}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none bg-white min-w-[150px]"
+          >
+            <option value="">All Statuses</option>
+            {COLUMNS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[880px] text-sm text-left">
+            <thead className="bg-slate-100 text-slate-600 text-xs uppercase font-bold border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Rider Info</th>
+                <th className="px-4 py-3">Vehicle Details</th>
+                <th className="px-4 py-3">City</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-center">Registration</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredDrivers.map(driver => (
+                <tr key={driver.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col">
+                      <span className="max-w-[190px] truncate font-bold text-slate-800" title={driver.name}>{driver.name}</span>
+                      <span className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Lucide.Phone size={10} /> {driver.phone}</span>
+                      {driver.driverPublicId && <span className="text-[10px] font-bold text-blue-600 mt-1 uppercase">{driver.driverPublicId}</span>}
+                      {driver.riderIdFormat !== "-" && <span className="text-[10px] font-semibold text-emerald-600 mt-1 uppercase">{driver.riderIdFormat}</span>}
                     </div>
-                    <p className="mb-1 flex items-center gap-1 text-xs text-slate-500"><Lucide.Phone size={12} /> {driver.phone}</p>
-                    <p className="mb-1 flex items-center gap-1 text-xs text-slate-500"><Lucide.MapPin size={12} /> {driver.city}</p>
-                    <p className="mb-3 flex items-center gap-1 text-xs text-slate-500"><Lucide.Car size={12} /> {driver.brandModel} · {driver.registrationNumber}</p>
-
-                    <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                      <Chip text={column.label} tone={column.tone} />
-                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        {column.id !== "APPROVED" && (
-                          <button
-                            type="button"
-                            onClick={() => syncStatus(driver, "APPROVED")}
-                            className="rounded-md border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-50"
-                          >
-                            Approve
-                          </button>
-                        )}
-                        {column.id !== "REJECTED" && (
-                          <button
-                            type="button"
-                            onClick={() => syncStatus(driver, "REJECTED")}
-                            className="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-50"
-                          >
-                            Reject
-                          </button>
-                        )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col">
+                      <span className="max-w-[220px] truncate font-bold text-slate-700 text-xs" title={driver.brandModel}>{driver.brandModel}</span>
+                      <span className="max-w-[220px] truncate text-xs text-slate-500 mt-0.5" title={driver.registrationNumber}>{driver.registrationNumber}</span>
+                      <span className="text-[10px] text-slate-400 uppercase mt-1 tracking-wider">{driver.vehicleType}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600 font-medium">{driver.city}</td>
+                  <td className="px-4 py-3">
+                    <Chip text={COLUMNS.find(c => c.id === driver.status)?.label || driver.status} tone={COLUMNS.find(c => c.id === driver.status)?.tone || "info"} />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {driver.source === "registration" ? (
+                      <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100">App Flow</span>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md border border-slate-200">Manual</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2 whitespace-nowrap">
+                      <Button variant="outline" className="h-8 text-xs bg-white" onClick={() => setSelectedRider(driver)}>View Profile</Button>
+                      <div className="relative group">
+                        <Button variant="outline" className="h-8 px-2 bg-white text-slate-500 hover:text-slate-900 border-slate-200 hover:bg-slate-50"><Lucide.MoreVertical size={14} /></Button>
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl w-32 py-1 hidden group-hover:block z-50">
+                          {driver.status !== "APPROVED" && <button className="w-full text-left px-4 py-2 text-xs text-emerald-600 hover:bg-emerald-50 font-bold" onClick={() => syncStatus(driver, "APPROVED")}>Approve</button>}
+                          {driver.status !== "REJECTED" && <button className="w-full text-left px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 font-bold" onClick={() => syncStatus(driver, "REJECTED")}>Reject</button>}
+                          <button className="w-full text-left px-4 py-2 text-xs text-slate-600 hover:bg-slate-50 font-bold" onClick={() => syncStatus(driver, "BLOCKED")}>Block</button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-                {columnDrivers.length === 0 && (
-                  <div className="flex h-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 opacity-50">
-                    <p className="text-xs font-semibold text-slate-400">Drag &amp; Drop Rider</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                  </td>
+                </tr>
+              ))}
+              {filteredDrivers.length === 0 && (
+                <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">No riders found matching the criteria.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       {showBlockModal && (
         <Modal onClose={() => setShowBlockModal(false)}>
@@ -424,87 +437,7 @@ export const RiderManagementBoard = ({ drivers, registrations, onRefresh }: Ride
       )}
 
       {selectedRider && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-sm" onClick={() => setSelectedRider(null)}>
-          <div className="h-full w-full max-w-xl animate-in overflow-y-auto bg-slate-50 shadow-2xl slide-in-from-right" onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-800">{selectedRider.name}</h2>
-                <p className="text-slate-500">{selectedRider.phone} · {selectedRider.city}</p>
-              </div>
-              <button onClick={() => setSelectedRider(null)} className="rounded-full p-2 transition-colors hover:bg-slate-100"><Lucide.X size={20} /></button>
-            </div>
-
-            <div className="space-y-6 p-6">
-              <Card className="flex items-center justify-between border border-slate-200 bg-white p-4 shadow-sm">
-                <div>
-                  <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500">Current Status</p>
-                  <Chip text={COLUMNS.find((item) => item.id === selectedRider.status)?.label || selectedRider.status} tone={COLUMNS.find((item) => item.id === selectedRider.status)?.tone || "info"} />
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Rider ID</p>
-                  <p className="mt-1 text-sm font-bold text-slate-800">{selectedRider.riderIdFormat}</p>
-                </div>
-              </Card>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-3 flex items-center gap-2 border-b pb-2 font-bold text-slate-700"><Lucide.User size={16} /> Personal Info</h3>
-                  <div className="space-y-2">
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Phone</span> <span className="text-sm font-semibold">{selectedRider.phone}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Owner</span> <span className="text-sm font-semibold">{selectedRider.ownerName || "-"}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">City</span> <span className="text-sm font-semibold">{selectedRider.city}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Area</span> <span className="text-sm font-semibold">{selectedRider.area || "-"}</span></p>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-3 flex items-center gap-2 border-b pb-2 font-bold text-slate-700"><Lucide.Car size={16} /> Vehicle Info</h3>
-                  <div className="space-y-2">
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Type</span> <span className="text-sm font-semibold">{selectedRider.vehicleType}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Model</span> <span className="text-sm font-semibold">{selectedRider.brandModel}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Reg No</span> <span className="text-sm font-semibold">{selectedRider.registrationNumber}</span></p>
-                    <p><span className="inline-block w-20 text-xs text-slate-500">Service</span> <span className="text-sm font-semibold">{selectedRider.serviceType || "-"}</span></p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h3 className="mb-3 flex items-center gap-2 border-b pb-2 font-bold text-slate-700"><Lucide.FileText size={16} /> Documents & Registration</h3>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Driver DL</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.driverDlNumber || "Missing"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Vehicle Category</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.vehicleCategory || "Missing"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Model Year</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.modelYear || "Missing"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Owner Phone</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.ownerPhone || "Missing"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Owner Email</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.ownerEmail || "Missing"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                    <p className="mb-1 text-xs text-slate-500">Comfort</p>
-                    <p className="text-sm font-bold text-slate-800">{selectedRider.hasAc ? "AC" : "Non AC"} {selectedRider.hasMusic ? "· Music" : ""}</p>
-                  </div>
-                </div>
-                {selectedRider.adminNote ? (
-                  <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
-                    <p className="font-semibold">Admin Note</p>
-                    <p className="mt-1">{selectedRider.adminNote}</p>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
+        <RiderProfileDashboard rider={selectedRider} onClose={() => setSelectedRider(null)} />
       )}
     </div>
   );

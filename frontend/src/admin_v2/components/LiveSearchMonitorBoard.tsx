@@ -28,7 +28,7 @@ export const LiveSearchMonitorBoard = () => {
   useEffect(() => { load(); }, [statusFilter]);
 
   const assignDriver = async (eventId: string) => {
-    const selected = window.prompt("Enter driver id to assign")?.trim();
+    const selected = window.prompt("Enter BMG rider ID or internal driver UUID")?.trim();
     if (!selected) return;
     try {
       await adminV2Api.assignSearchDriver(eventId, selected);
@@ -80,12 +80,13 @@ export const LiveSearchMonitorBoard = () => {
 
       <Card>
         <h3 className="text-lg font-bold text-slate-900 mb-2">Available Drivers ({drivers.length})</h3>
-        <p className="text-xs text-slate-500">Use any driver ID in assign action</p>
+        <p className="text-xs text-slate-500">Use BMG rider ID in assign action; internal UUID is kept only for backend trace.</p>
         <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
           {drivers.map((d) => (
             <div key={d.id} className="rounded-lg border border-slate-200 p-2 text-xs">
               <p className="font-semibold text-slate-800">{d.name}</p>
-              <p className="text-slate-500">{d.id}</p>
+              <p className="font-mono font-semibold text-blue-700">{d.rider_id_format || d.public_id || d.id}</p>
+              <p className="font-mono text-slate-400">{d.public_id && d.rider_id_format ? d.public_id : d.id}</p>
             </div>
           ))}
         </div>
@@ -97,9 +98,17 @@ export const LiveSearchMonitorBoard = () => {
           {rows.map((r) => (
             <div key={r.id} className="rounded-xl border border-slate-200 p-3 flex items-center justify-between gap-3">
               <div>
+                <p className="font-mono text-xs font-bold text-blue-700">{r.public_id || r.id}</p>
                 <p className="text-sm font-bold text-slate-900">{r.pickup_location} -&gt; {r.drop_location}</p>
                 <p className="text-xs text-slate-500 uppercase">{r.search_mode} | {r.vehicle_type} | Status: {r.status}</p>
-                <p className="text-xs text-slate-600">Searching Time: {r.searched_seconds}s | User: {r.user_id || "-"}</p>
+                <p className="text-xs text-slate-600">
+                  Searching Time: {r.searched_seconds}s | User: {r.user_public_id || r.user_id || "-"} | Ride: {r.ride_public_id || r.ride_id || "-"}
+                </p>
+                {(r.assigned_driver_rider_id || r.assigned_driver_public_id) && (
+                  <p className="text-xs font-semibold text-emerald-700">
+                    Assigned: {r.assigned_driver_rider_id || r.assigned_driver_public_id}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => assignDriver(r.id)}>Assign Driver</Button>

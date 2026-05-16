@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.common.deps import get_current_user, require_role
 from app.api.common.realtime import realtime_manager
 from app.core.config import settings
+from app.core.ids import next_ride_public_id, next_search_public_id, public_payment_id
 from app.core.notifications import notify_new_ride_request_batch, notify_ride_cancelled
 from app.db import engine, get_db
 from app.models import (
@@ -198,6 +199,7 @@ def _validate_location_payload(
 def _tracking_payload(ride: Ride) -> RideTrackingRead:
     return RideTrackingRead(
         ride_id=ride.id,
+        booking_display_id=ride.booking_display_id,
         status=ride.status,
         pickup_location=ride.pickup_location,
         destination=ride.destination,
@@ -263,8 +265,11 @@ async def create_ride(
     )
     db.add(ride)
     db.flush()
+    ride.public_id = next_ride_public_id(db, Ride)
+    ride.payment_public_id = public_payment_id(ride.public_id)
     db.add(
         RideSearchEvent(
+            public_id=next_search_public_id(db, RideSearchEvent),
             user_id=current_user.id,
             pickup_location=payload.pickup_location,
             drop_location=payload.destination,
@@ -753,7 +758,11 @@ async def mark_ride_payment(
                 },
             },
         )
-    return PaymentReceiveRead(ride_id=ride.id, payment_status=ride.payment_status, status=ride.status)
+    if not ride.payment_public_id:
+        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
+        db.commit()
+        db.refresh(ride)
+    return PaymentReceiveRead(ride_id=ride.id, payment_public_id=ride.payment_public_id, payment_status=ride.payment_status, status=ride.status)
 
 
 @router.get("/{ride_id}/tracking", response_model=RideTrackingRead)

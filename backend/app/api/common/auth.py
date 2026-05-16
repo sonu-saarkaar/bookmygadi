@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.api.common.deps import get_current_user
 from app.core.config import settings
+from app.core.ids import next_user_public_id
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db import get_db
 from app.models import AuthOtp, User, RefreshToken
@@ -134,15 +135,9 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> Token:
     db.commit()
     db.refresh(user)
 
-    # Assign enterprise-style public IDs without breaking old UUID primary key.
+    # Assign clean BookMyGadi public ID without breaking old UUID primary key.
     if not user.public_id:
-        role_prefix = "USER" if user.role == "customer" else "RIDER" if user.role == "driver" else "ADMIN"
-        count = db.query(User).filter(User.role == user.role).count()
-        candidate = f"BMG-{role_prefix}-{count:03d}"
-        while db.query(User).filter(User.public_id == candidate).first():
-            count += 1
-            candidate = f"BMG-{role_prefix}-{count:03d}"
-        user.public_id = candidate
+        user.public_id = next_user_public_id(db, User)
         db.commit()
 
     token = create_access_token(subject=user.id, role=user.role)
@@ -286,13 +281,7 @@ def _issue_token_for_user(user: User, db: Session) -> Token:
 def _assign_public_id(user: User, db: Session) -> None:
     if user.public_id:
         return
-    role_prefix = "USER" if user.role == "customer" else "RIDER" if user.role == "driver" else "ADMIN"
-    count = db.query(User).filter(User.role == user.role).count()
-    candidate = f"BMG-{role_prefix}-{count:03d}"
-    while db.query(User).filter(User.public_id == candidate).first():
-        count += 1
-        candidate = f"BMG-{role_prefix}-{count:03d}"
-    user.public_id = candidate
+    user.public_id = next_user_public_id(db, User)
 
 
 @router.post("/rider/register-pin", response_model=Token, status_code=status.HTTP_201_CREATED)

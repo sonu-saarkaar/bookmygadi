@@ -16,6 +16,10 @@ import { CompanyStructureBoard } from "@/admin_v2/components/CompanyStructureBoa
 import { PolicyManagementBoard } from "@/admin_v2/components/PolicyManagementBoard";
 import { LiveSearchMonitorBoard } from "@/admin_v2/components/LiveSearchMonitorBoard";
 import { SupportDeskBoard } from "@/admin_v2/components/SupportDeskBoard";
+import { AdminDashboardOverview } from "@/admin_v2/components/AdminDashboardOverview";
+import { EnterpriseDashboard } from "@/admin_v2/components/EnterpriseDashboard";
+import { FinanceSettlementBoard } from "@/admin_v2/components/FinanceSettlementBoard";
+import { DailyEarningsReport } from "@/admin_v2/components/DailyEarningsReport";
 
 const toneForStatus = (status?: string) => {
   const s = (status || "").toLowerCase();
@@ -32,11 +36,22 @@ const KV = ({ title, value }: { title: string; value: string | number }) => (
   </Card>
 );
 
+const DetailField = ({ label, value }: { label: string; value: any }) => {
+  const display = typeof value === "boolean" ? (value ? "Yes" : "No") : value;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-slate-800">{display || "-"}</p>
+    </div>
+  );
+};
+
 export const AdminV2PanelPage = () => {
   const { module, query, pushToast } = useAdminV2Store();
   const [kpis, setKpis] = useState<Record<string, number>>({});
   const [live, setLive] = useState<any>({ pending_rides: [], driver_live: [], alerts: [] });
   const [riders, setRiders] = useState<any[]>([]);
+  const [managedUsers, setManagedUsers] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [rides, setRides] = useState<any[]>([]);
@@ -51,15 +66,16 @@ export const AdminV2PanelPage = () => {
   const [selectedRegistrationId, setSelectedRegistrationId] = useState<string>("");
   const [registrationDraft, setRegistrationDraft] = useState<Partial<RiderRegistrationItem> | null>(null);
   const [registrationRemark, setRegistrationRemark] = useState("");
+  const [registrationSearch, setRegistrationSearch] = useState("");
 
   const loadRegistrations = async (resetSelection = false) => {
     try {
       const rows = await adminV2Api.listRiderRegistrations(registrationStatus === "all" ? undefined : registrationStatus);
       setRegistrations(rows);
-      if (rows.length > 0 && (resetSelection || !selectedRegistrationId)) {
-        setSelectedRegistrationId(rows[0].id);
-        setRegistrationDraft(rows[0]);
-        setRegistrationRemark(rows[0].admin_note || "");
+      if (resetSelection) {
+        setSelectedRegistrationId("");
+        setRegistrationDraft(null);
+        setRegistrationRemark("");
       }
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Unable to load rider registrations", "danger");
@@ -76,7 +92,10 @@ export const AdminV2PanelPage = () => {
         await adminV2Api.rejectRiderRegistration(id, note);
         pushToast("Registration rejected", "warning");
       }
-      loadRegistrations();
+      setSelectedRegistrationId("");
+      setRegistrationDraft(null);
+      setRegistrationRemark("");
+      await loadRegistrations(true);
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Registration action failed", "danger");
     }
@@ -120,12 +139,18 @@ export const AdminV2PanelPage = () => {
         vehicle_type: registrationDraft.vehicle_type,
         service_type: registrationDraft.service_type,
         color: registrationDraft.color,
+        seater_count: registrationDraft.seater_count,
+        vehicle_condition: registrationDraft.vehicle_condition,
+        rc_number: registrationDraft.rc_number,
+        insurance_number: registrationDraft.insurance_number,
+        notes: registrationDraft.notes,
         model_year: registrationDraft.model_year,
         has_ac: registrationDraft.has_ac,
         has_music: registrationDraft.has_music,
         owner_name: registrationDraft.owner_name,
         owner_phone: registrationDraft.owner_phone,
         owner_email: registrationDraft.owner_email,
+        owner_address: registrationDraft.owner_address,
         driver_name: registrationDraft.driver_name,
         driver_number: registrationDraft.driver_number,
         driver_calling_number: registrationDraft.driver_calling_number,
@@ -152,7 +177,10 @@ export const AdminV2PanelPage = () => {
         await adminV2Api.requestChangesRiderRegistration(selectedRegistrationId, registrationRemark || "Please refile with corrections");
         pushToast("Sent for refile", "info");
       }
-      loadRegistrations();
+      setSelectedRegistrationId("");
+      setRegistrationDraft(null);
+      setRegistrationRemark("");
+      await loadRegistrations(true);
     } catch (e) {
       pushToast(e instanceof Error ? e.message : "Registration action failed", "danger");
     }
@@ -173,6 +201,7 @@ export const AdminV2PanelPage = () => {
       adminV2Api.logs(),
       adminV2Api.listAllServices(),
       adminV2Api.listRiderRegistrations(),
+      adminV2Api.listManagedUsers(),
     ]);
 
     const valueOr = <T,>(index: number, fallback: T): T => {
@@ -192,6 +221,7 @@ export const AdminV2PanelPage = () => {
     setTasks(valueOr(9, []));
     setLogs(valueOr(10, []));
     setAllRegistrations(valueOr(12, []));
+    setManagedUsers(valueOr(13, []));
 
     loadRegistrations();
 
@@ -229,12 +259,15 @@ export const AdminV2PanelPage = () => {
       return;
     }
     const selected = registrations.find((r) => r.id === selectedRegistrationId);
-    if (!selected) {
-      setSelectedRegistrationId(registrations[0].id);
-      setRegistrationDraft(registrations[0]);
-      setRegistrationRemark(registrations[0].admin_note || "");
+    if (selected) {
+      setRegistrationDraft(selected);
+      setRegistrationRemark(selected.admin_note || "");
+    } else if (selectedRegistrationId) {
+      setSelectedRegistrationId("");
+      setRegistrationDraft(null);
+      setRegistrationRemark("");
     }
-  }, [registrations]);
+  }, [registrations, selectedRegistrationId]);
 
   const riderCols = useMemo<ColumnDef<any>[]>(() => [
     { header: "Name", accessorKey: "name" },
@@ -297,30 +330,42 @@ export const AdminV2PanelPage = () => {
 
 
   const selectedRegistration = registrations.find((r) => r.id === selectedRegistrationId) || null;
+  const selectedRegistrationDriver = selectedRegistration ? drivers.find((driver) => driver.id === selectedRegistration.driver_id) : null;
+  const orderedRegistrations = useMemo(() => {
+    const search = registrationSearch.trim().toLowerCase();
+    return [...registrations]
+      .sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+      .filter((r) => {
+        if (!search) return true;
+        return [
+          r.brand_model,
+          r.registration_number,
+          r.vehicle_type,
+          r.service_type,
+          r.owner_name,
+          r.owner_phone,
+          r.driver_name,
+          r.driver_number,
+          r.area,
+          r.rider_id_format,
+          r.request_public_id,
+        ].some((value) => String(value || "").toLowerCase().includes(search));
+      });
+  }, [registrations, registrationSearch]);
 
   const moduleView = () => {
     if (module === "dashboard") return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <KV title="Total Riders" value={kpis.total_riders || 0} />
-          <KV title="Total Drivers" value={kpis.total_drivers || 0} />
-          <KV title="Active Rides" value={kpis.active_rides || 0} />
-          <KV title="Revenue" value={`Rs ${new Intl.NumberFormat("en-IN").format(kpis.revenue || 0)}`} />
-        </div>
-        <Card>
-          <p className="mb-2 text-lg font-semibold text-slate-900">Live Ops Feed</p>
-          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 p-2">
-              <p className="text-sm font-semibold">Pending Ride Requests</p>
-              <p className="text-xs text-slate-500">{live.pending_rides?.length || 0} live requests</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 p-2">
-              <p className="text-sm font-semibold">Driver Live Status</p>
-              <p className="text-xs text-slate-500">{live.driver_live?.length || 0} active drivers</p>
-            </div>
-          </div>
-        </Card>
-      </div>
+      <AdminDashboardOverview
+        kpis={kpis}
+        live={live}
+        rides={rides}
+        drivers={drivers}
+        users={managedUsers}
+        finance={finance}
+        tickets={tickets}
+        registrations={allRegistrations}
+        onRefresh={refreshAll}
+      />
     );
     if (module === "users-mgmt") return <UserManagementBoard />;
     if (module === "rider-mgmt") return <RiderManagementBoard drivers={drivers} registrations={allRegistrations} onRefresh={refreshAll} />;
@@ -335,9 +380,12 @@ export const AdminV2PanelPage = () => {
 
     if (module === "registrations") return (
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xl font-bold text-slate-800">Rider Vehicle Registration Approvals</p>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xl font-bold text-slate-800">Vehicle KYC Approvals</p>
+            <p className="text-sm text-slate-500">Oldest vehicle request stays on top. Open details to verify, modify, approve, reject, or send for refile.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</label>
             <select
               value={registrationStatus}
@@ -345,6 +393,7 @@ export const AdminV2PanelPage = () => {
               className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm"
             >
               <option value="pending">Pending</option>
+              <option value="changes_requested">Refile</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
               <option value="all">All</option>
@@ -360,100 +409,217 @@ export const AdminV2PanelPage = () => {
           <KV title="Refile" value={registrations.filter((r) => (r.status || "").toLowerCase() === "changes_requested").length} />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Card className="xl:col-span-1 p-0 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
-              <p className="text-sm font-semibold text-slate-800">Incoming Requests</p>
-              <p className="text-xs text-slate-500">Select request to review details</p>
+        {!selectedRegistration && (
+        <Card className="overflow-hidden bg-white p-0 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 p-4">
+            <div>
+              <p className="font-bold text-slate-800">Vehicle KYC Request List</p>
+              <p className="text-xs text-slate-500">{orderedRegistrations.length} records shown, sorted by first submitted.</p>
             </div>
-            <div className="max-h-[640px] overflow-y-auto">
-              {registrations.map((r) => {
-                const isSelected = r.id === selectedRegistrationId;
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => handleSelectRegistration(r)}
-                    className={`w-full border-b border-slate-100 px-4 py-3 text-left transition-colors ${isSelected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-800">{r.brand_model || "Vehicle"}</p>
+            <input
+              value={registrationSearch}
+              onChange={(e) => setRegistrationSearch(e.target.value)}
+              placeholder="Search vehicle, owner, driver, RC, city"
+              className="h-10 min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500"
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-100 text-xs font-bold uppercase text-slate-600">
+                <tr>
+                  <th className="px-4 py-3">Submitted</th>
+                  <th className="px-4 py-3">Vehicle</th>
+                  <th className="px-4 py-3">Owner</th>
+                  <th className="px-4 py-3">Driver</th>
+                  <th className="px-4 py-3">Area</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {orderedRegistrations.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-slate-800">{r.created_at ? new Date(r.created_at).toLocaleDateString("en-IN") : "-"}</p>
+                      <p className="text-xs text-slate-500">{r.created_at ? new Date(r.created_at).toLocaleTimeString("en-IN") : "Oldest first"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-slate-800">{r.brand_model || "Vehicle details pending"}</p>
+                      <p className="text-xs font-semibold uppercase text-slate-500">{r.registration_number || "RC pending"}</p>
+                      <p className="text-xs text-slate-400">{r.vehicle_category || r.vehicle_type || "-"} / {r.service_type || "Service not set"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-700">{r.owner_name || "-"}</p>
+                      <p className="text-xs text-slate-500">{r.owner_phone || r.owner_email || "-"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-700">{r.driver_name || "-"}</p>
+                      <p className="text-xs text-slate-500">{r.driver_number || r.driver_calling_number || "-"}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{r.area || "-"}</td>
+                    <td className="px-4 py-3">
                       <Chip text={r.status || "pending"} tone={toneForStatus(r.status)} />
-                    </div>
-                    <p className="text-xs text-slate-600 mt-1">{r.registration_number || "-"}</p>
-                    <p className="text-xs text-slate-500 mt-1">{r.owner_name || r.driver_name || r.driver_id}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </Card>
+                      {r.request_public_id && <p className="mt-1 text-[11px] font-bold uppercase text-blue-600">{r.request_public_id}</p>}
+                      {r.rider_id_format && <p className="text-[11px] font-bold uppercase text-emerald-600">{r.rider_id_format}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button className="h-8 px-3 text-xs" variant="outline" onClick={() => handleSelectRegistration(r)}>View Details</Button>
+                    </td>
+                  </tr>
+                ))}
+                {orderedRegistrations.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-400">No vehicle KYC requests found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+        )}
 
-          <Card className="xl:col-span-2 space-y-4">
-            {!selectedRegistration || !registrationDraft ? (
-              <p className="text-sm text-slate-500">Select a request from left side to review details.</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Card className="p-3">
-                    <p className="text-xs uppercase tracking-wider text-slate-500">Current Status</p>
-                    <div className="mt-2"><Chip text={selectedRegistration.status || "pending"} tone={toneForStatus(selectedRegistration.status)} /></div>
+        {selectedRegistration && registrationDraft && (
+          <div className="space-y-4">
+            <Card className="overflow-hidden p-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+                <div>
+                  <p className="text-lg font-black text-slate-900">Vehicle KYC Details Page</p>
+                  <p className="text-xs text-slate-500">All details submitted by the rider during vehicle registration are shown below.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Chip text={selectedRegistration.status || "pending"} tone={toneForStatus(selectedRegistration.status)} />
+                  <Button variant="ghost" onClick={() => { setSelectedRegistrationId(""); setRegistrationDraft(null); setRegistrationRemark(""); }}>Back to List</Button>
+                </div>
+              </div>
+              <div className="p-5">
+                <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <Card className="rounded-lg p-3">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">Submitted At</p>
+                    <p className="mt-2 text-sm font-bold text-slate-800">{new Date(selectedRegistration.created_at).toLocaleString("en-IN")}</p>
                   </Card>
-                  <Card className="p-3">
+                  <Card className="rounded-lg p-3">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">BMG Request ID</p>
+                    <p className="mt-2 text-sm font-bold text-slate-800">{selectedRegistration.request_public_id || selectedRegistration.id}</p>
+                  </Card>
+                  <Card className="rounded-lg p-3">
                     <p className="text-xs uppercase tracking-wider text-slate-500">BMG Rider ID</p>
                     <p className="mt-2 text-sm font-bold text-slate-800">{selectedRegistration.rider_id_format || "Pending Generation"}</p>
                   </Card>
-                  <Card className="p-3">
-                    <p className="text-xs uppercase tracking-wider text-slate-500">Submitted At</p>
-                    <p className="mt-2 text-sm font-bold text-slate-800">{new Date(selectedRegistration.created_at).toLocaleString()}</p>
+                </div>
+
+                <div className="mb-5 grid grid-cols-1 gap-5 xl:grid-cols-3">
+                  <Card className="rounded-lg xl:col-span-1">
+                    <p className="mb-3 font-bold text-slate-900">Submitted Vehicle Details</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <DetailField label="Vehicle Category" value={selectedRegistration.vehicle_category} />
+                      <DetailField label="Vehicle Type" value={selectedRegistration.vehicle_type} />
+                      <DetailField label="Service Type" value={selectedRegistration.service_type} />
+                      <DetailField label="Brand / Model" value={selectedRegistration.brand_model} />
+                      <DetailField label="Registration Number" value={selectedRegistration.registration_number} />
+                      <DetailField label="RC Number" value={selectedRegistration.rc_number} />
+                      <DetailField label="Insurance Number" value={selectedRegistration.insurance_number} />
+                      <DetailField label="Color" value={selectedRegistration.color} />
+                      <DetailField label="Model Year" value={selectedRegistration.model_year} />
+                      <DetailField label="Seater Count" value={selectedRegistration.seater_count} />
+                      <DetailField label="Vehicle Condition" value={selectedRegistration.vehicle_condition} />
+                      <DetailField label="AC Available" value={selectedRegistration.has_ac} />
+                      <DetailField label="Music Available" value={selectedRegistration.has_music} />
+                    </div>
+                  </Card>
+
+                  <Card className="rounded-lg xl:col-span-1">
+                    <p className="mb-3 font-bold text-slate-900">Submitted Owner Details</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <DetailField label="Owner Name" value={selectedRegistration.owner_name} />
+                      <DetailField label="Owner Phone" value={selectedRegistration.owner_phone} />
+                      <DetailField label="Owner Email" value={selectedRegistration.owner_email} />
+                      <DetailField label="Owner Address" value={selectedRegistration.owner_address} />
+                      <DetailField label="Owner is Driver" value={selectedRegistration.is_owner_driver} />
+                      <DetailField label="Operating Area / City" value={selectedRegistration.area} />
+                    </div>
+                  </Card>
+
+                  <Card className="rounded-lg xl:col-span-1">
+                    <p className="mb-3 font-bold text-slate-900">Submitted Driver & Admin Details</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <DetailField label="Driver Name" value={selectedRegistration.driver_name} />
+                      <DetailField label="Driver Number" value={selectedRegistration.driver_number} />
+                      <DetailField label="Calling Number" value={selectedRegistration.driver_calling_number} />
+                      <DetailField label="Driver DL Number" value={selectedRegistration.driver_dl_number} />
+                      <DetailField label="Driver User ID" value={selectedRegistrationDriver?.public_id || selectedRegistration.driver_id} />
+                      <DetailField label="Internal Driver UUID" value={selectedRegistration.driver_id} />
+                      <DetailField label="Admin Note" value={selectedRegistration.admin_note} />
+                      <DetailField label="User Notes" value={selectedRegistration.notes} />
+                      <DetailField label="Approved By" value={selectedRegistration.approved_by} />
+                      <DetailField label="Last Updated" value={selectedRegistration.updated_at ? new Date(selectedRegistration.updated_at).toLocaleString("en-IN") : ""} />
+                    </div>
                   </Card>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <input value={registrationDraft.brand_model || ""} onChange={(e) => handleRegistrationFieldChange("brand_model", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle model" />
-                  <input value={registrationDraft.registration_number || ""} onChange={(e) => handleRegistrationFieldChange("registration_number", e.target.value.toUpperCase())} className="h-10 rounded-lg border border-slate-300 px-3 text-sm uppercase" placeholder="Registration number" />
-                  <input value={registrationDraft.vehicle_category || ""} onChange={(e) => handleRegistrationFieldChange("vehicle_category", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle category" />
-                  <input value={registrationDraft.vehicle_type || ""} onChange={(e) => handleRegistrationFieldChange("vehicle_type", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle type" />
-                  <input value={registrationDraft.service_type || ""} onChange={(e) => handleRegistrationFieldChange("service_type", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Service type" />
-                  <input value={registrationDraft.area || ""} onChange={(e) => handleRegistrationFieldChange("area", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Area/City" />
-                  <input value={registrationDraft.color || ""} onChange={(e) => handleRegistrationFieldChange("color", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Color" />
-                  <input value={registrationDraft.model_year || ""} onChange={(e) => handleRegistrationFieldChange("model_year", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Model year" />
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                  <Card className="rounded-lg">
+                    <p className="mb-3 font-bold text-slate-900">Admin Correction - Vehicle Details</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <input value={registrationDraft.brand_model || ""} onChange={(e) => handleRegistrationFieldChange("brand_model", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle model" />
+                      <input value={registrationDraft.registration_number || ""} onChange={(e) => handleRegistrationFieldChange("registration_number", e.target.value.toUpperCase())} className="h-10 rounded-lg border border-slate-300 px-3 text-sm uppercase" placeholder="Registration number" />
+                      <input value={registrationDraft.vehicle_category || ""} onChange={(e) => handleRegistrationFieldChange("vehicle_category", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle category" />
+                      <input value={registrationDraft.vehicle_type || ""} onChange={(e) => handleRegistrationFieldChange("vehicle_type", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle type" />
+                      <input value={registrationDraft.service_type || ""} onChange={(e) => handleRegistrationFieldChange("service_type", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Service type" />
+                      <input value={registrationDraft.area || ""} onChange={(e) => handleRegistrationFieldChange("area", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Area/City" />
+                      <input value={registrationDraft.color || ""} onChange={(e) => handleRegistrationFieldChange("color", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Color" />
+                      <input value={registrationDraft.model_year || ""} onChange={(e) => handleRegistrationFieldChange("model_year", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Model year" />
+                      <input type="number" value={registrationDraft.seater_count || ""} onChange={(e) => handleRegistrationFieldChange("seater_count", Number(e.target.value) || undefined)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Seater count" />
+                      <input value={registrationDraft.vehicle_condition || ""} onChange={(e) => handleRegistrationFieldChange("vehicle_condition", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Vehicle condition" />
+                      <input value={registrationDraft.rc_number || ""} onChange={(e) => handleRegistrationFieldChange("rc_number", e.target.value.toUpperCase())} className="h-10 rounded-lg border border-slate-300 px-3 text-sm uppercase" placeholder="RC number" />
+                      <input value={registrationDraft.insurance_number || ""} onChange={(e) => handleRegistrationFieldChange("insurance_number", e.target.value.toUpperCase())} className="h-10 rounded-lg border border-slate-300 px-3 text-sm uppercase" placeholder="Insurance number" />
+                      <div className="flex h-10 items-center gap-3 rounded-lg border border-slate-300 px-3">
+                        <label className="text-sm text-slate-600">AC</label>
+                        <input type="checkbox" checked={Boolean(registrationDraft.has_ac)} onChange={(e) => handleRegistrationFieldChange("has_ac", e.target.checked)} />
+                        <label className="text-sm text-slate-600">Music</label>
+                        <input type="checkbox" checked={Boolean(registrationDraft.has_music)} onChange={(e) => handleRegistrationFieldChange("has_music", e.target.checked)} />
+                      </div>
+                      <textarea value={registrationDraft.notes || ""} onChange={(e) => handleRegistrationFieldChange("notes", e.target.value)} className="min-h-[80px] rounded-lg border border-slate-300 p-3 text-sm sm:col-span-2" placeholder="User notes / vehicle notes" />
+                    </div>
+                  </Card>
+
+                  <Card className="rounded-lg">
+                    <p className="mb-3 font-bold text-slate-900">Admin Correction - Owner & Driver Details</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <input value={registrationDraft.owner_name || ""} onChange={(e) => handleRegistrationFieldChange("owner_name", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner name" />
+                      <input value={registrationDraft.owner_phone || ""} onChange={(e) => handleRegistrationFieldChange("owner_phone", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner phone" />
+                      <input value={registrationDraft.owner_email || ""} onChange={(e) => handleRegistrationFieldChange("owner_email", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner email" />
+                      <input value={registrationDraft.driver_name || ""} onChange={(e) => handleRegistrationFieldChange("driver_name", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver name" />
+                      <input value={registrationDraft.driver_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver number" />
+                      <input value={registrationDraft.driver_calling_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_calling_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver calling number" />
+                      <input value={registrationDraft.driver_dl_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_dl_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver DL number" />
+                      <textarea value={registrationDraft.owner_address || ""} onChange={(e) => handleRegistrationFieldChange("owner_address", e.target.value)} className="min-h-[80px] rounded-lg border border-slate-300 p-3 text-sm sm:col-span-2" placeholder="Owner address" />
+                    </div>
+                  </Card>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <input value={registrationDraft.owner_name || ""} onChange={(e) => handleRegistrationFieldChange("owner_name", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner name" />
-                  <input value={registrationDraft.owner_phone || ""} onChange={(e) => handleRegistrationFieldChange("owner_phone", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner phone" />
-                  <input value={registrationDraft.owner_email || ""} onChange={(e) => handleRegistrationFieldChange("owner_email", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Owner email" />
-                  <input value={registrationDraft.driver_name || ""} onChange={(e) => handleRegistrationFieldChange("driver_name", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver name" />
-                  <input value={registrationDraft.driver_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver number" />
-                  <input value={registrationDraft.driver_calling_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_calling_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver calling number" />
-                  <input value={registrationDraft.driver_dl_number || ""} onChange={(e) => handleRegistrationFieldChange("driver_dl_number", e.target.value)} className="h-10 rounded-lg border border-slate-300 px-3 text-sm" placeholder="Driver DL number" />
-                  <div className="flex items-center gap-3 rounded-lg border border-slate-300 px-3">
-                    <label className="text-sm text-slate-600">AC</label>
-                    <input type="checkbox" checked={Boolean(registrationDraft.has_ac)} onChange={(e) => handleRegistrationFieldChange("has_ac", e.target.checked)} />
-                    <label className="text-sm text-slate-600">Music</label>
-                    <input type="checkbox" checked={Boolean(registrationDraft.has_music)} onChange={(e) => handleRegistrationFieldChange("has_music", e.target.checked)} />
-                  </div>
+                <div className="mt-4">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500">Admin Remark</label>
+                  <textarea value={registrationRemark} onChange={(e) => setRegistrationRemark(e.target.value)} className="h-24 w-full rounded-lg border border-slate-300 p-3 text-sm" placeholder="Write verification note / rejection reason / refile instruction" />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Admin Remark</label>
-                  <textarea value={registrationRemark} onChange={(e) => setRegistrationRemark(e.target.value)} className="w-full h-24 rounded-lg border border-slate-300 p-3 text-sm" placeholder="Write verification note / rejection reason / refile instruction" />
-                </div>
-
-                <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
+                <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
                   <Button className="h-9 px-3" onClick={handleSaveRegistrationDraft}>Modify Save</Button>
                   <Button className="h-9 px-3 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleRegistrationDecision("approve")}>Approve / Verify</Button>
                   <Button className="h-9 px-3 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={() => handleRegistrationDecision("refile")}>Send for Refile</Button>
                   <Button className="h-9 px-3 border-rose-300 text-rose-700 hover:bg-rose-50" onClick={() => handleRegistrationDecision("reject")}>Reject</Button>
                 </div>
-              </>
-            )}
-          </Card>
-        </div>
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
     );
 
     if (module === "support") return <DataTable data={tickets} columns={ticketCols} />;
     if (module === "finance") return <DataTable data={finance.rows || []} columns={paymentCols} />;
+    if (module === "finance-dashboard") return <EnterpriseDashboard kpis={kpis} live={live} rides={rides} drivers={drivers} onRefresh={refreshAll} />;
+    if (module === "finance-settlement") return <FinanceSettlementBoard onRefresh={refreshAll} />;
+    if (module === "earnings-report") return <DailyEarningsReport rides={rides} />;
     if (module === "tasks") {
       const lanes = ["todo", "in_progress", "in_review", "blocked", "resolved"];
       return (

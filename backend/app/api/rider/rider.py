@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.common.deps import get_admin_user, decode_access_token
 from app.api.common.realtime import realtime_manager
 from app.core.config import settings
+from app.core.ids import public_payment_id
 from app.core.notifications import (
     notify_ride_accepted,
     notify_driver_arriving,
@@ -110,6 +111,7 @@ def _validate_location_payload(ride: Ride, payload: LocationUpdate) -> tuple[flo
 def _tracking_payload(ride: Ride) -> RideTrackingRead:
     return RideTrackingRead(
         ride_id=ride.id,
+        booking_display_id=ride.booking_display_id,
         status=ride.status,
         pickup_location=ride.pickup_location,
         destination=ride.destination,
@@ -823,9 +825,11 @@ def receive_payment(
         raise HTTPException(status_code=409, detail="Ride must be completed before payment")
 
     ride.payment_status = "paid"
+    if not ride.payment_public_id:
+        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
     db.commit()
     db.refresh(ride)
-    return PaymentReceiveRead(ride_id=ride.id, payment_status=ride.payment_status, status=ride.status)
+    return PaymentReceiveRead(ride_id=ride.id, payment_public_id=ride.payment_public_id, payment_status=ride.payment_status, status=ride.status)
 
 
 @router.post("/active/{ride_id}/feedback")
