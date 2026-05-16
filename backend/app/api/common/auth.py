@@ -10,7 +10,7 @@ from email.mime.multipart import MIMEMultipart
 import string
 import secrets
 import httpx
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.api.common.deps import get_current_user
 from app.core.config import settings
@@ -247,6 +247,20 @@ class PhoneOtpVerifyPayload(BaseModel):
     role: str = "driver"
 
 
+class RiderPinLoginPayload(BaseModel):
+    phone: str
+    pin: str = Field(min_length=4, max_length=4)
+
+
+class RiderPinRegisterPayload(BaseModel):
+    first_name: str = Field(min_length=1, max_length=60)
+    last_name: str = Field(min_length=1, max_length=60)
+    phone: str
+    email: EmailStr
+    pin: str = Field(min_length=4, max_length=4)
+    avatar_data: str | None = None
+
+
 def _normalize_phone(phone: str) -> str:
     digits = "".join(ch for ch in (phone or "") if ch.isdigit())
     if len(digits) == 12 and digits.startswith("91"):
@@ -267,6 +281,72 @@ def _issue_token_for_user(user: User, db: Session) -> Token:
     db.add(RefreshToken(user_id=user.id, token=refresh_token_val, expires_at=refresh_expires))
     db.commit()
     return Token(access_token=token, refresh_token=refresh_token_val, role=user.role)
+
+
+def _assign_public_id(user: User, db: Session) -> None:
+    if user.public_id:
+        return
+    role_prefix = "USER" if user.role == "customer" else "RIDER" if user.role == "driver" else "ADMIN"
+    count = db.query(User).filter(User.role == user.role).count()
+    candidate = f"BMG-{role_prefix}-{count:03d}"
+    while db.query(User).filter(User.public_id == candidate).first():
+        count += 1
+        candidate = f"BMG-{role_prefix}-{count:03d}"
+    user.public_id = candidate
+
+
+@router.post("/rider/register-pin", response_model=Token, status_code=status.HTTP_201_CREATED)
+def register_rider_with_pin(payload: RiderPinRegisterPayload, db: Session = Depends(get_db)) -> Token:
+    phone = _normalize_phone(payload.phone)
+    pin = "".join(ch for ch in payload.pin if ch.isdigit())
+    if len(pin) != 4:
+        raise HTTPException(status_code=400, detail="4 digit PIN required")
+
+    existing_email = db.query(User).filter(User.email == payload.email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    existing_rider = db.query(User).filter(
+        User.phone == phone,
+        User.role.in_({"driver", "admin"}),
+    ).first()
+    if existing_rider:
+        raise HTTPException(status_code=409, detail="Rider account already exists for this mobile number")
+
+    user = User(
+        name=f"{payload.first_name.strip()} {payload.last_name.strip()}".strip(),
+        email=str(payload.email).lower().strip(),
+        phone=phone,
+        role="driver",
+        status="active",
+        driver_status="offline",
+        avatar_data=payload.avatar_data,
+        password_hash=get_password_hash(pin),
+    )
+    db.add(user)
+    db.flush()
+    _assign_public_id(user, db)
+    db.commit()
+    db.refresh(user)
+    return _issue_token_for_user(user, db)
+
+
+@router.post("/rider/pin-login", response_model=Token)
+@limiter.limit("8/minute")
+def rider_pin_login(request: Request, payload: RiderPinLoginPayload, db: Session = Depends(get_db)) -> Token:
+    phone = _normalize_phone(payload.phone)
+    pin = "".join(ch for ch in payload.pin if ch.isdigit())
+    if len(pin) != 4:
+        raise HTTPException(status_code=400, detail="4 digit PIN required")
+
+    user = db.query(User).filter(
+        User.phone == phone,
+        User.role.in_({"driver", "admin"}),
+    ).first()
+    if not user or not verify_password(pin, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid mobile number or PIN")
+
+    return _issue_token_for_user(user, db)
 
 
 def _send_apitxt_otp(phone: str, otp: str) -> bool:
@@ -294,10 +374,19 @@ def _send_apitxt_otp(phone: str, otp: str) -> bool:
     try:
         response = httpx.get(endpoint, params=params, timeout=10.0)
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            logger.info("APITxT OTP SMS accepted for %s with non-JSON response", phone)
+            return True
         status = str(data.get("status", "")).lower()
         message = str(data.get("message", "")).lower()
-        if status in {"200", "success"} or message.endswith("sent successfully"):
+        if (
+            status in {"200", "success"}
+            or "sent successfully" in message
+            or "otp sent" in message
+            or bool(data.get("data", {}).get("request_id"))
+        ):
             return True
         logger.warning("APITxT OTP SMS failed for %s: %s", phone, data)
     except Exception as exc:
@@ -335,8 +424,13 @@ def start_phone_otp(payload: PhoneOtpStartPayload, db: Session = Depends(get_db)
 
     sent = _send_apitxt_otp(phone, otp)
     print(f"RIDER LOGIN OTP for {phone}: {otp}")
+    if not sent:
+        row.is_used = True
+        db.commit()
+        raise HTTPException(status_code=503, detail="OTP SMS delivery failed. Please retry in a moment.")
+
     dev_otp = otp if settings.bmg_return_otp_in_response else None
-    message = "OTP sent to registered mobile number." if sent else "OTP generated, but SMS delivery failed."
+    message = "OTP sent to registered mobile number."
     return PhoneOtpStartResponse(message=message, dev_otp=dev_otp)
 
 

@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     dispatch_prefer_radius_km: float = 15.0
 
     # APITxT OTP SMS
-    apitxt_authkey: str = ""
+    apitxt_authkey: str = "UQaW70R22lDj1hOmlwJ2si9k0BjHRWBFztafCiJehuI"
     apitxt_otp_endpoint: str = "https://www.apitxt.com/api/sendOTP"
     apitxt_otp_channel: str = "sms"
     apitxt_country: str = "91"
