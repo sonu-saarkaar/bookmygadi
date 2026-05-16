@@ -21,7 +21,7 @@ Welcome to BookMyGadi, Bihar's most reliable and fastest ride-booking platform! 
 
 **Key Features:**
 *   **Instant Booking:** Get a Bike, Auto, or Cab at your doorstep in minutes.
-*   **Reserve Rides:** Booking for outstation trips or weddings? Reserve a car or Bolero up to 30 days in advance.
+*   **Reserve Rides:** Booking for outstation trips or weddings? Reserve a car or Bolero up to 2 days in advance.
 *   **Price Negotiation:** Fair pricing model where you and the driver agree on a price that works for both.
 *   **Live Tracking & Safety:** Real-time location tracking and built-in SOS emergency features.
 *   **Verified Drivers:** All our drivers are strictly verified for your safety.

@@ -10,6 +10,10 @@ def _default_database_url() -> str:
     return f"sqlite:///{db_path}"
 
 
+def _env_file_path() -> str:
+    return (Path(__file__).resolve().parents[2] / ".env").as_posix()
+
+
 class Settings(BaseSettings):
     app_name: str = "BookMyGadi API"
     app_env: str = "development"
@@ -42,8 +46,16 @@ class Settings(BaseSettings):
     # FCM dispatch: prefer drivers whose last live location is within this radius of pickup.
     dispatch_prefer_radius_km: float = 15.0
 
+    # APITxT OTP SMS
+    apitxt_authkey: str = ""
+    apitxt_otp_endpoint: str = "https://www.apitxt.com/api/sendOTP"
+    apitxt_otp_channel: str = "sms"
+    apitxt_country: str = "91"
+    apitxt_template_id: str = ""
+    bmg_return_otp_in_response: bool = False
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file_path(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

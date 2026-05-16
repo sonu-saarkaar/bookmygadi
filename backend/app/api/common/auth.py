@@ -9,9 +9,11 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import string
 import secrets
+import httpx
 from pydantic import BaseModel, EmailStr
 
 from app.api.common.deps import get_current_user
+from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db import get_db
 from app.models import AuthOtp, User, RefreshToken
@@ -227,6 +229,148 @@ def update_fcm_token(payload: FcmTokenUpdate, current_user: User = Depends(get_c
     current_user.fcm_token = payload.fcm_token
     db.commit()
     return {"message": "FCM token updated successfully"}
+
+
+class PhoneOtpStartPayload(BaseModel):
+    phone: str
+    role: str = "driver"
+
+
+class PhoneOtpStartResponse(BaseModel):
+    message: str
+    dev_otp: str | None = None
+
+
+class PhoneOtpVerifyPayload(BaseModel):
+    phone: str
+    otp: str
+    role: str = "driver"
+
+
+def _normalize_phone(phone: str) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) != 10:
+        raise HTTPException(status_code=400, detail="Valid 10 digit mobile number required")
+    return digits
+
+
+def _otp_identity(phone: str) -> str:
+    return f"phone:{phone}"
+
+
+def _issue_token_for_user(user: User, db: Session) -> Token:
+    token = create_access_token(subject=user.id, role=user.role)
+    refresh_token_val = secrets.token_urlsafe(32)
+    refresh_expires = datetime.utcnow() + timedelta(days=7)
+    db.add(RefreshToken(user_id=user.id, token=refresh_token_val, expires_at=refresh_expires))
+    db.commit()
+    return Token(access_token=token, refresh_token=refresh_token_val, role=user.role)
+
+
+def _send_apitxt_otp(phone: str, otp: str) -> bool:
+    authkey = settings.apitxt_authkey.strip()
+    endpoint = settings.apitxt_otp_endpoint.strip()
+    channel = settings.apitxt_otp_channel.strip() or "sms"
+    country = settings.apitxt_country.strip() or "91"
+    template_id = settings.apitxt_template_id.strip()
+
+    if not authkey or not endpoint:
+        logger.warning("APITxT OTP SMS not configured. OTP for %s is %s", phone, otp)
+        return False
+
+    mobile = phone if phone.startswith(country) else f"{country}{phone}"
+    params = {
+        "authkey": authkey,
+        "mobile": mobile,
+        "otp": otp,
+        "channel": channel,
+        "country": country,
+    }
+    if template_id:
+        params["template_id"] = template_id
+
+    try:
+        response = httpx.get(endpoint, params=params, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        status = str(data.get("status", "")).lower()
+        message = str(data.get("message", "")).lower()
+        if status in {"200", "success"} or message.endswith("sent successfully"):
+            return True
+        logger.warning("APITxT OTP SMS failed for %s: %s", phone, data)
+    except Exception as exc:
+        logger.warning("APITxT OTP SMS error for %s: %s", phone, exc)
+    return False
+
+
+@router.post("/otp/start", response_model=PhoneOtpStartResponse)
+def start_phone_otp(payload: PhoneOtpStartPayload, db: Session = Depends(get_db)):
+    phone = _normalize_phone(payload.phone)
+    if _is_rate_limited(f"otp-start:{phone}", max_attempts=5, window_seconds=600):
+        raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
+
+    allowed_roles = {"driver", "admin"} if payload.role == "driver" else {payload.role}
+    user = db.query(User).filter(User.phone == phone, User.role.in_(allowed_roles)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Rider account not found for this mobile number")
+
+    db.query(AuthOtp).filter(
+        AuthOtp.email == _otp_identity(phone),
+        AuthOtp.purpose == "rider_phone_login",
+        AuthOtp.is_used.is_(False),
+    ).update({"is_used": True})
+
+    otp = str(random.randint(1000, 9999))
+    row = AuthOtp(
+        email=_otp_identity(phone),
+        purpose="rider_phone_login",
+        otp_code=otp,
+        expires_at=datetime.utcnow() + timedelta(minutes=5),
+        is_used=False,
+    )
+    db.add(row)
+    db.commit()
+
+    sent = _send_apitxt_otp(phone, otp)
+    print(f"RIDER LOGIN OTP for {phone}: {otp}")
+    dev_otp = otp if settings.bmg_return_otp_in_response else None
+    message = "OTP sent to registered mobile number." if sent else "OTP generated, but SMS delivery failed."
+    return PhoneOtpStartResponse(message=message, dev_otp=dev_otp)
+
+
+@router.post("/otp/verify", response_model=Token)
+def verify_phone_otp(payload: PhoneOtpVerifyPayload, db: Session = Depends(get_db)):
+    phone = _normalize_phone(payload.phone)
+    if _is_rate_limited(f"otp-verify:{phone}", max_attempts=10, window_seconds=600):
+        raise HTTPException(status_code=429, detail="Too many OTP attempts. Try again later.")
+
+    row = (
+        db.query(AuthOtp)
+        .filter(
+            AuthOtp.email == _otp_identity(phone),
+            AuthOtp.purpose == "rider_phone_login",
+            AuthOtp.otp_code == payload.otp.strip(),
+            AuthOtp.is_used.is_(False),
+        )
+        .order_by(AuthOtp.created_at.desc())
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    if row.expires_at < datetime.utcnow():
+        row.is_used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    allowed_roles = {"driver", "admin"} if payload.role == "driver" else {payload.role}
+    user = db.query(User).filter(User.phone == phone, User.role.in_(allowed_roles)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Rider account not found")
+
+    row.is_used = True
+    return _issue_token_for_user(user, db)
 
 
 class AdminForgotStartPayload(BaseModel):
