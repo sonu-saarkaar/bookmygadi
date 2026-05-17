@@ -1,25 +1,4 @@
 from datetime import date, datetime
-
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
-
-
-class HealthResponse(BaseModel):
-    status: str
-    message: str
-    database_path: str | None = None
-    database_exists: bool | None = None
-    users_count: int | None = None
-    rides_count: int | None = None
-
-
-class Token(BaseModel):
-    access_token: str
-    refresh_token: str | None = None
-    token_type: str = "bearer"
-    role: str | None = None
-
-class RefreshRequest(BaseModel):
-from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
@@ -428,6 +407,33 @@ class RiderActiveRideRead(BaseModel):
     driver_dl_number: str | None = None
 
 
+class RiderVehicleRegistrationCreate(BaseModel):
+    vehicle_type: str = "car"
+    brand_model: str = Field(min_length=2, max_length=120)
+    registration_number: str = Field(min_length=4, max_length=40)
+    color: str | None = None
+    seater_count: int = Field(default=4, ge=1, le=14)
+    vehicle_condition: str | None = None
+    area: str | None = None
+    rc_number: str | None = None
+    insurance_number: str | None = None
+    notes: str | None = None
+    vehicle_category: str | None = None
+    service_type: str | None = None
+    model_year: str | None = None
+    has_ac: bool | None = True
+    has_music: bool | None = False
+    owner_name: str | None = None
+    owner_phone: str | None = None
+    owner_email: str | None = None
+    owner_address: str | None = None
+    is_owner_driver: bool | None = True
+    driver_name: str | None = None
+    driver_number: str | None = None
+    driver_calling_number: str | None = None
+    driver_dl_number: str | None = None
+
+
 class RiderVehicleRegistrationUpdate(BaseModel):
     vehicle_type: str | None = None
     brand_model: str | None = Field(default=None, min_length=2, max_length=120)
@@ -606,6 +612,100 @@ class AdminSystemHealthRead(BaseModel):
     warnings: list[str]
 
 
+class AdminSupportTicketCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str | None = None
+    category: str = "general"
+    severity: str = "medium"
+    created_by: str | None = None
+
+
+class AdminSupportTicketAssign(BaseModel):
+    assignee_admin_id: str
+
+
+class AdminSupportTicketStatusUpdate(BaseModel):
+    status: str
+
+
+class AdminTicketActionUpdate(BaseModel):
+    admin_response: str | None = None
+    emergency_dispatched: str | None = None
+    assigned_vehicle_id: str | None = None
+    assigned_to: str | None = None
+    status: str | None = None
+
+
+class AdminSupportTicketRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    description: str | None = None
+    category: str
+    severity: str
+    status: str
+    assigned_to: str | None = None
+    created_by: str | None = None
+    ride_id: str | None = None
+    reporter_phone: str | None = None
+    reporter_role: str | None = None
+    pickup_location: str | None = None
+    drop_location: str | None = None
+    pickup_lat: float | None = None
+    pickup_lng: float | None = None
+    admin_response: str | None = None
+    emergency_dispatched: str | None = None
+    assigned_vehicle_id: str | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminTaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    type: str = "ops"
+    priority: str = "medium"
+    assignee_admin_id: str | None = None
+    details: str | None = None
+
+
+class AdminTaskAssign(BaseModel):
+    assignee_admin_id: str
+
+
+class AdminTaskStatusUpdate(BaseModel):
+    status: str
+
+
+class AdminTaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    type: str
+    priority: str
+    status: str
+    assignee_admin_id: str | None = None
+    details: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminAuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    module: str
+    action: str
+    admin_id: str | None = None
+    admin_name: str | None = None
+    admin_role: str | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ServiceMetadataCreate(BaseModel):
     title: str = Field(min_length=2, max_length=100)
     description: str
@@ -647,4 +747,195 @@ class ServiceMetadataRead(BaseModel):
     display_order: int
     is_active: bool
     created_at: datetime
+
+
+class PricingQuoteRead(BaseModel):
+    pickup_area: str
+    destination_area: str
+    vehicle_type: str
+    estimated_distance_km: float
+    billable_distance_km: float
+    suggested_fare: int
+    min_fare: int
+    max_fare: int
+    demand_multiplier: float
+    vehicle_multiplier: float
+    pricing_algorithm: str
+    service_profile: str | None = None
+
+
+class NearbyRiderRead(BaseModel):
+    driver_id: str
+    driver_name: str | None = None
+    lat: float
+    lng: float
+    distance_km: float
+
+
+class RoutePriceRuleCreate(BaseModel):
+    pickup_area: str
+    destination_area: str
+    base_km: float = 5.0
+    base_fare: int = 120
+    per_km_rate: float = 16.0
+    min_fare: int = 100
+    max_multiplier: float = 1.25
+    is_active: bool = True
+
+
+class RoutePriceRuleUpdate(BaseModel):
+    pickup_area: str | None = None
+    destination_area: str | None = None
+    base_km: float | None = None
+    base_fare: int | None = None
+    per_km_rate: float | None = None
+    min_fare: int | None = None
+    max_multiplier: float | None = None
+    is_active: bool | None = None
+
+
+class RoutePriceRuleRead(RoutePriceRuleCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class RoutePriceRuleBulkUpsert(BaseModel):
+    rows: list[RoutePriceRuleCreate]
+
+
+class VehiclePriceModifierCreate(BaseModel):
+    vehicle_type: str
+    multiplier: float = 1.0
+    flat_adjustment: int = 0
+    min_fare_floor: int = 80
+    is_active: bool = True
+
+
+class VehiclePriceModifierUpdate(BaseModel):
+    vehicle_type: str | None = None
+    multiplier: float | None = None
+    flat_adjustment: int | None = None
+    min_fare_floor: int | None = None
+    is_active: bool | None = None
+
+
+class VehiclePriceModifierRead(VehiclePriceModifierCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReserveQuoteRow(BaseModel):
+    driver_id: str
+    driver_name: str | None = None
+    driver_phone: str | None = None
+    route_from: str
+    route_to: str
+    quoted_price: int
+    radius_km: int
+
+
+class ReserveQuoteRead(BaseModel):
+    route_from: str
+    route_to: str
+    duration_hours: int
+    radius_km: int
+    nearby_driver_count: int
+    min_price: int
+    max_price: int
+    source: str
+    rows: list[ReserveQuoteRow]
+
+
+class ReserveRoutePriceCreate(BaseModel):
+    route_from: str
+    route_to: str
+    vehicle_type: str = "car"
+    price_6h: int | None = None
+    price_12h: int
+    price_24h: int | None = None
+    is_active: bool = True
+
+
+class ReserveRoutePriceUpdate(BaseModel):
+    route_from: str | None = None
+    route_to: str | None = None
+    vehicle_type: str | None = None
+    price_6h: int | None = None
+    price_12h: int | None = None
+    price_24h: int | None = None
+    is_active: bool | None = None
+
+
+class ReserveRoutePriceRead(ReserveRoutePriceCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    driver_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReserveDefaultRateCreate(BaseModel):
+    route_from: str = "*"
+    route_to: str = "*"
+    vehicle_type: str = "car"
+    duration_hours: int = 12
+    default_min_price: int = 2200
+    default_max_price: int = 4200
+    is_active: bool = True
+
+
+class ReserveDefaultRateUpdate(BaseModel):
+    route_from: str | None = None
+    route_to: str | None = None
+    vehicle_type: str | None = None
+    duration_hours: int | None = None
+    default_min_price: int | None = None
+    default_max_price: int | None = None
+    is_active: bool | None = None
+
+
+class ReserveDefaultRateRead(ReserveDefaultRateCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class RiderScheduleCreate(BaseModel):
+    ride_date: date
+    pickup_time: str | None = None
+    pickup_location: str | None = None
+    destination: str | None = None
+    vehicle_type: str = "car"
+    fare: int | None = None
+    notes: str | None = None
+    status: str = "scheduled"
+
+
+class RiderScheduleUpdate(BaseModel):
+    ride_date: date | None = None
+    pickup_time: str | None = None
+    pickup_location: str | None = None
+    destination: str | None = None
+    vehicle_type: str | None = None
+    fare: int | None = None
+    notes: str | None = None
+    status: str | None = None
+
+
+class RiderScheduleRead(RiderScheduleCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    driver_id: str
+    created_at: datetime
+    updated_at: datetime
 

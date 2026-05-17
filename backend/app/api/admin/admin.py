@@ -855,3 +855,231 @@ def admin_logs(
     db: Session = Depends(get_db),
 ) -> list[AdminAuditLogRead]:
     return db.query(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(300).all()
+
+
+# ==================== USER MANAGEMENT ENDPOINTS ====================
+
+@router.delete("/users/{user_id}", response_model=dict)
+def admin_delete_user(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Delete user completely from database along with all related data"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.role == "admin":
+        raise HTTPException(status_code=403, detail="Cannot delete admin users")
+
+    # Delete all rides where user is customer or driver
+    db.query(Ride).filter(
+        (Ride.customer_id == user_id) | (Ride.driver_id == user_id)
+    ).delete(synchronize_session=False)
+
+    # Delete vehicle registrations
+    db.query(RiderVehicleRegistration).filter(
+        RiderVehicleRegistration.driver_id == user_id
+    ).delete(synchronize_session=False)
+
+    # Delete the user
+    db.delete(user)
+
+    # Log action
+    _log_admin_action(db, admin, "users", f"Deleted user {user.email} (ID: {user_id})")
+    db.commit()
+
+    return {"ok": True, "message": f"User {user.email} and all related data deleted successfully"}
+
+
+@router.delete("/rides/{ride_id}", response_model=dict)
+def admin_delete_ride(
+    ride_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific ride from database"""
+    ride = db.get(Ride, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+
+    db.delete(ride)
+    _log_admin_action(db, admin, "rides", f"Deleted ride {ride.public_id}")
+    db.commit()
+
+    return {"ok": True, "message": f"Ride {ride.public_id} deleted successfully"}
+
+
+@router.patch("/users/{user_id}/verify", response_model=dict)
+def admin_verify_user(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Mark user as verified"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.status = "verified"
+    _log_admin_action(db, admin, "users", f"Verified user {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"User {user.email} marked as verified"}
+
+
+@router.patch("/users/{user_id}/unverify", response_model=dict)
+def admin_unverify_user(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Mark user as unverified (active)"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.status = "active"
+    _log_admin_action(db, admin, "users", f"Unverified user {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"User {user.email} marked as active"}
+
+
+@router.patch("/users/{user_id}/block", response_model=dict)
+def admin_block_user(
+    user_id: str,
+    payload: RiderBlockPayload,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Block a user"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_blocked = True
+    user.blocked_reason = (payload.reason if payload else None) or "Blocked by admin"
+    user.status = "blocked"
+    _log_admin_action(db, admin, "users", f"Blocked user {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"User {user.email} blocked successfully"}
+
+
+@router.patch("/users/{user_id}/unblock", response_model=dict)
+def admin_unblock_user(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Unblock a user"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_blocked = False
+    user.blocked_reason = None
+    user.status = "active"
+    _log_admin_action(db, admin, "users", f"Unblocked user {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"User {user.email} unblocked successfully"}
+
+
+@router.patch("/drivers/{user_id}/verify", response_model=dict)
+def admin_verify_driver(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Mark driver as verified"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    if user.role != "driver":
+        raise HTTPException(status_code=400, detail="User is not a driver")
+
+    user.status = "verified"
+    user.driver_status = "verified"
+    _log_admin_action(db, admin, "drivers", f"Verified driver {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"Driver {user.email} verified successfully"}
+
+
+@router.delete("/drivers/{user_id}", response_model=dict)
+def admin_delete_driver(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Delete driver and all associated data"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    if user.role != "driver":
+        raise HTTPException(status_code=400, detail="User is not a driver")
+
+    # Delete all rides where driver
+    db.query(Ride).filter(Ride.driver_id == user_id).delete(synchronize_session=False)
+
+    # Delete vehicle registrations
+    db.query(RiderVehicleRegistration).filter(
+        RiderVehicleRegistration.driver_id == user_id
+    ).delete(synchronize_session=False)
+
+    # Delete user
+    db.delete(user)
+    _log_admin_action(db, admin, "drivers", f"Deleted driver {user.email}")
+    db.commit()
+
+    return {"ok": True, "message": f"Driver {user.email} and all related data deleted successfully"}
+
+
+@router.patch("/rides/{ride_id}/cancel-by-admin", response_model=AdminRideOpsRead)
+def admin_force_cancel_ride(
+    ride_id: str,
+    payload: RideCancelPayload,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Force cancel a ride by admin"""
+    ride = db.get(Ride, ride_id)
+    if not ride:
+        raise HTTPException(status_code=404, detail="Ride not found")
+
+    ride.status = "cancelled"
+    ride.cancellation_reason = payload.reason or "Cancelled by admin"
+    ride.cancelled_by_role = "admin"
+    ride.cancelled_at = datetime.utcnow()
+
+    _log_admin_action(db, admin, "rides", f"Force cancelled ride {ride.public_id}")
+    db.commit()
+
+    return _admin_ride_read(ride)
+
+
+@router.get("/dashboard/stats", response_model=dict)
+def admin_get_stats(
+    _: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get detailed admin statistics"""
+    total_users = db.query(func.count(User.id)).scalar()
+    total_drivers = db.query(func.count(User.id)).filter(User.role == "driver").scalar()
+    total_rides = db.query(func.count(Ride.id)).scalar()
+    blocked_users = db.query(func.count(User.id)).filter(User.is_blocked == True).scalar()
+    verified_users = db.query(func.count(User.id)).filter(User.status == "verified").scalar()
+
+    return {
+        "total_users": total_users,
+        "total_drivers": total_drivers,
+        "total_rides": total_rides,
+        "blocked_users": blocked_users,
+        "verified_users": verified_users,
+        "active_users": total_users - blocked_users,
+    }

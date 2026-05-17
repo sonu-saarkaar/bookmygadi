@@ -2,6 +2,7 @@ from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 import json
+import mimetypes
 import time
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -557,6 +558,7 @@ app.include_router(distributed_platform_router, prefix=f"{settings.api_prefix}/d
 
 app_release_dir = Path(settings.app_release_storage_dir).resolve()
 app_release_dir.mkdir(parents=True, exist_ok=True)
+mimetypes.add_type("application/vnd.android.package-archive", ".apk")
 app.mount("/downloads/app-releases", StaticFiles(directory=str(app_release_dir)), name="app_releases")
 
 

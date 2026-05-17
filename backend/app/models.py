@@ -364,35 +364,6 @@ class RiderVehicleRegistration(Base, TimestampMixin):
     driver_dl_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     rider_id_format: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True)
     request_public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
-
-
-class ReserveRoutePrice(Base, TimestampMixin):
-    __tablename__ = "reserve_route_prices"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    driver_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    route_from: Mapped[str] = mapped_column(String(120), index=True)
-    route_to: Mapped[str] = mapped_column(String(120), index=True)
-    vehicle_type: Mapped[str] = mapped_column(String(40), default="car", index=True)
-    price_6h: Mapped[int | None] = mapped_column(Integer, nullable=True)   # auto-calc if None
-    price_12h: Mapped[int] = mapped_column(Integer)
-    price_24h: Mapped[int | None] = mapped_column(Integer, nullable=True)  # auto-calc if None
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class ReserveDefaultRate(Base, TimestampMixin):
-    __tablename__ = "reserve_default_rates"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    route_from: Mapped[str] = mapped_column(String(120), default="*")
-    route_to: Mapped[str] = mapped_column(String(120), default="*")
-    vehicle_type: Mapped[str] = mapped_column(String(40), default="car", index=True)
-    duration_hours: Mapped[int] = mapped_column(Integer, default=12)
-    default_min_price: Mapped[int] = mapped_column(Integer, default=2200)
-    default_max_price: Mapped[int] = mapped_column(Integer, default=4200)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
 class ServiceMetadata(Base, TimestampMixin):
     __tablename__ = "service_metadata"
 
@@ -558,145 +529,6 @@ class ReserveDefaultRate(Base, TimestampMixin):
     default_min_price: Mapped[int] = mapped_column(Integer, default=2200)
     default_max_price: Mapped[int] = mapped_column(Integer, default=4200)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class ServiceMetadata(Base, TimestampMixin):
-    __tablename__ = "service_metadata"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    title: Mapped[str] = mapped_column(String(100))
-    description: Mapped[str] = mapped_column(Text)
-    vehicle_type: Mapped[str] = mapped_column(String(40))
-    service_mode: Mapped[str] = mapped_column(String(20), default="Instant Ride") # Instant Ride, reserve
-    vehicle_model: Mapped[str | None] = mapped_column(String(80), nullable=True) # Swift, Wedding Special, etc.
-    icon_name: Mapped[str] = mapped_column(String(40), default="Car") # Lucide icon name
-    tag_highlight: Mapped[str | None] = mapped_column(String(40), nullable=True) # Popular, Best Value
-    color_scheme: Mapped[str] = mapped_column(String(100), default="from-emerald-400 to-emerald-600")
-    display_order: Mapped[int] = mapped_column(Integer, default=0)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class AdminSupportTicket(Base, TimestampMixin):
-    __tablename__ = "admin_support_tickets"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    title: Mapped[str] = mapped_column(String(160))
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str] = mapped_column(String(40), default="general")
-    severity: Mapped[str] = mapped_column(String(20), default="medium")
-    status: Mapped[str] = mapped_column(String(20), default="open")
-    assigned_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    # Extended ride context
-    ride_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    reporter_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    reporter_role: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    pickup_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    drop_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    pickup_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
-    pickup_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # Admin actions
-    admin_response: Mapped[str | None] = mapped_column(Text, nullable=True)
-    emergency_dispatched: Mapped[str | None] = mapped_column(String(40), nullable=True)  # police|ambulance|fire|team
-    assigned_vehicle_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
-
-
-class AdminTask(Base, TimestampMixin):
-    __tablename__ = "admin_tasks"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    title: Mapped[str] = mapped_column(String(160))
-    type: Mapped[str] = mapped_column(String(40), default="ops")
-    priority: Mapped[str] = mapped_column(String(20), default="medium")
-    status: Mapped[str] = mapped_column(String(20), default="todo")
-    assignee_admin_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class AdminAuditLog(Base, TimestampMixin):
-    __tablename__ = "admin_audit_logs"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    module: Mapped[str] = mapped_column(String(40), default="admin")
-    action: Mapped[str] = mapped_column(String(200))
-    admin_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    admin_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    admin_role: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="success")
-
-
-# CRM Models
-
-class CRMTeamMember(Base, TimestampMixin):
-    __tablename__ = "team_members"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(255), unique=True)
-    role: Mapped[str] = mapped_column(String(40), default="TEAM MEMBER") # SUPER ADMIN, ADMIN, TEAM MEMBER
-
-
-class CRMDriver(Base, TimestampMixin):
-    __tablename__ = "drivers"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String(120))
-    phone: Mapped[str] = mapped_column(String(20))
-    address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
-    vehicle_type: Mapped[str] = mapped_column(String(40), default="car")
-    brand_model: Mapped[str] = mapped_column(String(120))
-    registration_number: Mapped[str] = mapped_column(String(40))
-    
-    license_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    rc_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    insurance_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    
-    status: Mapped[str] = mapped_column(String(40), default="NEW")
-    assigned_member_id: Mapped[str | None] = mapped_column(ForeignKey("team_members.id"), nullable=True)
-    
-    blocked_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    assignments: Mapped[list["CRMDriverAssignment"]] = relationship("CRMDriverAssignment", back_populates="driver", cascade="all, delete-orphan")
-    logs: Mapped[list["CRMDriverLog"]] = relationship("CRMDriverLog", back_populates="driver", cascade="all, delete-orphan")
-    referral: Mapped["CRMReferral | None"] = relationship("CRMReferral", back_populates="driver", uselist=False, cascade="all, delete-orphan")
-
-
-class CRMDriverAssignment(Base, TimestampMixin):
-    __tablename__ = "driver_assignments"
-    
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"))
-    assigned_by: Mapped[str] = mapped_column(ForeignKey("team_members.id"))
-    assigned_to: Mapped[str] = mapped_column(ForeignKey("team_members.id"))
-
-    driver: Mapped[CRMDriver] = relationship("CRMDriver", back_populates="assignments")
-
-
-class CRMDriverLog(Base, TimestampMixin):
-    __tablename__ = "driver_logs"
-    
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"))
-    action: Mapped[str] = mapped_column(String(255))
-    changed_by_name: Mapped[str] = mapped_column(String(120), default="System")
-
-    driver: Mapped[CRMDriver] = relationship("CRMDriver", back_populates="logs")
-
-
-class CRMReferral(Base, TimestampMixin):
-    __tablename__ = "referrals"
-    
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"), unique=True)
-    referral_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    referral_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    referral_type: Mapped[str] = mapped_column(String(40))
-
-    driver: Mapped[CRMDriver] = relationship("CRMDriver", back_populates="referral")
 
 # --- User Management Extensions ---
 
@@ -765,6 +597,13 @@ class RefreshToken(Base, TimestampMixin):
 
 class AuthOtp(Base, TimestampMixin):
     __tablename__ = "auth_otps"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), index=True)
+    otp_code: Mapped[str] = mapped_column(String(10))
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class AdminTeamMember(Base, TimestampMixin):

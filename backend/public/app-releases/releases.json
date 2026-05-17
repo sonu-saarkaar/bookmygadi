@@ -1,0 +1,30 @@
+{
+  "releases": [
+    {
+      "id": "5d379c12-d70b-4c4f-9774-257be8ff19c6",
+      "app_type": "user",
+      "version_name": "1.0",
+      "version_code": null,
+      "release_notes": null,
+      "file_name": "app-user-debug.apk",
+      "file_size": 22004712,
+      "sha256": "40ab840b4fae16c490630cc71de2226fbf041239385c50a1f7a59cae56f44447",
+      "download_path": "/downloads/app-releases/user/20260517071410-5d379c12-app-user-debug.apk",
+      "uploaded_at": "2026-05-17T07:14:10.510023",
+      "uploaded_by": "admin@bookmygadi.com"
+    },
+    {
+      "id": "df73b05e-49e2-45cf-873d-b3e60f404b71",
+      "app_type": "rider",
+      "version_name": "1.0",
+      "version_code": null,
+      "release_notes": "This is the latest Rider app",
+      "file_name": "app-debug.apk",
+      "file_size": 24296750,
+      "sha256": "d4b410ba4944bc720cc2d684f7c00e9525a7a48ce3599b30c7f9f4d8814c316a",
+      "download_path": "/downloads/app-releases/rider/20260517072006-df73b05e-app-debug.apk",
+      "uploaded_at": "2026-05-17T07:20:06.486055",
+      "uploaded_by": "admin@bookmygadi.com"
+    }
+  ]
+}

@@ -47,7 +47,7 @@ def _ensure_storage() -> None:
 def _read_manifest() -> dict:
     _ensure_storage()
     try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8-sig"))
         if isinstance(data.get("releases"), list):
             return data
     except (OSError, json.JSONDecodeError):
