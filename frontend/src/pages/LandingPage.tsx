@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   ArrowRight,
@@ -19,9 +19,10 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
+import { getLatestAppReleases, type LatestAppReleases } from "@/services/appReleases";
 
-const userAppDownloadUrl = import.meta.env.VITE_USER_APP_DOWNLOAD_URL || "/download#apps";
-const riderAppDownloadUrl = import.meta.env.VITE_RIDER_APP_DOWNLOAD_URL || "/download#apps";
+const fallbackUserAppDownloadUrl = import.meta.env.VITE_USER_APP_DOWNLOAD_URL || "/download#apps";
+const fallbackRiderAppDownloadUrl = import.meta.env.VITE_RIDER_APP_DOWNLOAD_URL || "/download#apps";
 
 const scrollTargets: Record<string, string> = {
   "/download": "apps",
@@ -58,6 +59,7 @@ const stats = [
 
 const LandingPage = () => {
   const location = useLocation();
+  const [latestApps, setLatestApps] = useState<LatestAppReleases>({ user: null, rider: null });
 
   useEffect(() => {
     const targetId = location.hash.replace("#", "") || scrollTargets[location.pathname];
@@ -68,8 +70,18 @@ const LandingPage = () => {
     }, 80);
   }, [location.hash, location.pathname]);
 
-  const isUserDownloadConfigured = userAppDownloadUrl !== "/download#apps";
-  const isRiderDownloadConfigured = riderAppDownloadUrl !== "/download#apps";
+  useEffect(() => {
+    getLatestAppReleases()
+      .then(setLatestApps)
+      .catch(() => undefined);
+  }, []);
+
+  const userAppDownloadUrl = latestApps.user?.download_url || fallbackUserAppDownloadUrl;
+  const riderAppDownloadUrl = latestApps.rider?.download_url || fallbackRiderAppDownloadUrl;
+  const isUserDownloadConfigured = Boolean(latestApps.user) || fallbackUserAppDownloadUrl !== "/download#apps";
+  const isRiderDownloadConfigured = Boolean(latestApps.rider) || fallbackRiderAppDownloadUrl !== "/download#apps";
+  const userVersionLabel = latestApps.user ? `v${latestApps.user.version_name}` : "v1.0";
+  const riderVersionLabel = latestApps.rider ? `v${latestApps.rider.version_name}` : "v1.0";
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -220,7 +232,7 @@ const LandingPage = () => {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-sm font-black text-emerald-700">Latest app download</p>
-              <h2 className="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Download BookMyGadi v1.0</h2>
+              <h2 className="mt-2 text-3xl font-black text-slate-950 sm:text-4xl">Download latest BookMyGadi apps</h2>
               <p className="mt-3 max-w-2xl text-base font-semibold leading-7 text-slate-600">
                 Customer aur rider dono app ke entry points yahin se milenge. Web booking ke liye browser se bhi ride start ho sakti hai.
               </p>
@@ -239,15 +251,16 @@ const LandingPage = () => {
               <div className="flex items-start gap-4">
                 <img src="/logo_user.png" alt="BookMyGadi customer app" className="h-16 w-16 rounded-lg bg-white object-contain p-1" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xl font-black text-slate-950">Customer App</p>
+                  <p className="text-xl font-black text-slate-950">Customer App · {userVersionLabel}</p>
                   <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">Ride booking, live location, fare flow, payment, history, and profile.</p>
+                  {latestApps.user?.release_notes && <p className="mt-2 text-xs font-bold leading-5 text-emerald-700">{latestApps.user.release_notes}</p>}
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <a
                       href={userAppDownloadUrl}
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700"
                     >
                       <Download size={17} />
-                      {isUserDownloadConfigured ? "Download User App" : "Download Page"}
+                      {isUserDownloadConfigured ? "Download Latest User App" : "Download Page"}
                     </a>
                     <Link to="/register" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-black text-slate-900 hover:bg-emerald-100">
                       <UserPlus size={17} />
@@ -262,15 +275,16 @@ const LandingPage = () => {
               <div className="flex items-start gap-4">
                 <img src="/logo_rider.png" alt="BookMyGadi rider app" className="h-16 w-16 rounded-lg bg-white object-contain p-1" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xl font-black text-slate-950">Rider Partner App</p>
+                  <p className="text-xl font-black text-slate-950">Rider Partner App · {riderVersionLabel}</p>
                   <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">Driver login, gadi registration, earning, live rides, and partner profile.</p>
+                  {latestApps.rider?.release_notes && <p className="mt-2 text-xs font-bold leading-5 text-amber-700">{latestApps.rider.release_notes}</p>}
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <a
                       href={riderAppDownloadUrl}
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 text-sm font-black text-white hover:bg-amber-700"
                     >
                       <Download size={17} />
-                      {isRiderDownloadConfigured ? "Download Rider App" : "Download Page"}
+                      {isRiderDownloadConfigured ? "Download Latest Rider App" : "Download Page"}
                     </a>
                     <Link to="/rider/login" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-black text-slate-900 hover:bg-amber-100">
                       <Car size={17} />

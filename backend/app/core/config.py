@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = [
         "https://bookmygadi.app",
         "https://www.bookmygadi.app",
+        "https://web.bookmygadi.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
