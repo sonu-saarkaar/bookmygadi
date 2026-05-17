@@ -1,0 +1,331 @@
+export const translations = {
+  en: {
+    nav: {
+      home: 'Home',
+      downloadApp: 'Download App',
+      becomeRider: 'Become Rider',
+      bookRide: 'Book Ride',
+      services: 'Services',
+      about: 'About',
+      support: 'Support',
+      contact: 'Contact',
+    },
+    hero: {
+      headline: "Bihar ka apna mobility platform",
+      subtext: "Ride • Earn • Reserve • Grow",
+      downloadRiderApp: "Download Rider App",
+      downloadUserApp: "Download User App",
+      registerAsDriver: "Register as Driver",
+      bookRide: "Book Ride",
+    },
+    whatIs: {
+      title: "What is BookMyGadi?",
+      subtitle: "Your mobility partner for Bihar",
+      services: [
+        {
+          title: "Instant Rides",
+          description: "Get a ride instantly, anywhere in Bihar",
+        },
+        {
+          title: "Reserve Rides",
+          description: "Book rides in advance for your convenience",
+        },
+        {
+          title: "Event Booking",
+          description: "Special transport for weddings and events",
+        },
+        {
+          title: "Marriage Vehicles",
+          description: "Luxury vehicles for your special day",
+        },
+        {
+          title: "Auto Services",
+          description: "Affordable auto-rickshaw rides",
+        },
+        {
+          title: "Bike Services",
+          description: "Quick and economical bike rides",
+        },
+        {
+          title: "Car Services",
+          description: "Comfortable car travel options",
+        },
+        {
+          title: "Pickup Services",
+          description: "Cargo and pickup vehicle services",
+        },
+        {
+          title: "Lorry Services",
+          description: "Heavy goods transport",
+        },
+      ],
+    },
+    why: {
+      title: "Why BookMyGadi?",
+      subtitle: "The platform designed for Bihar",
+      benefits: [
+        {
+          title: "No Registration Fee",
+          description: "Start without any hidden charges",
+        },
+        {
+          title: "No Hidden Commission",
+          description: "Transparent pricing for all",
+        },
+        {
+          title: "Local Rate Rides",
+          description: "Fair prices set by locals",
+        },
+        {
+          title: "More Earning",
+          description: "Better rates for drivers",
+        },
+        {
+          title: "Bihar Focused",
+          description: "Built for Bihar, by Biharis",
+        },
+        {
+          title: "Flexible Pricing",
+          description: "Choose your own rates",
+        },
+      ],
+    },
+    earnings: {
+      title: "How Riders Earn",
+      subtitle: "Flexible income opportunities",
+      dailyEstimate: "Daily Estimate",
+      monthlyEstimate: "Monthly Estimate",
+      registerNow: "Register Now",
+      perRide: "Per Ride",
+      category: "Category",
+    },
+    download: {
+      title: "Download BookMyGadi",
+      playStore: "Download from Play Store",
+      apk: "Download APK",
+      comingSoon: "Coming Soon",
+      scanQR: "Scan QR Code",
+    },
+    register: {
+      title: "Get Started with BookMyGadi",
+      userRegistration: "User Registration",
+      riderRegistration: "Rider Registration",
+      businessRegistration: "Business Registration",
+      fleetOwnerRegistration: "Fleet Owner Registration",
+      registerNow: "Register Now",
+    },
+    liveCounters: {
+      title: "BookMyGadi Metrics",
+      riders: "Registered Riders",
+      users: "Active Users",
+      cities: "Cities",
+      rides: "Rides Completed",
+    },
+    about: {
+      title: "About BookMyGadi",
+      vision: "Vision",
+      mission: "Mission",
+      story: "Our Story",
+      founderMessage: "Founder's Message",
+    },
+    support: {
+      title: "Support & Help",
+      faq: "Frequently Asked Questions",
+      contactUs: "Contact Us",
+      whatsapp: "WhatsApp",
+      call: "Call",
+      email: "Email",
+      submitTicket: "Submit Support Ticket",
+    },
+    footer: {
+      privacy: "Privacy Policy",
+      terms: "Terms & Conditions",
+      refund: "Refund Policy",
+      careers: "Careers",
+      support: "Support",
+      followUs: "Follow Us",
+      copyright: "© 2024 BookMyGadi. All rights reserved.",
+    },
+    forms: {
+      email: "Email Address",
+      phone: "Phone Number",
+      password: "Password",
+      name: "Full Name",
+      city: "City",
+      submit: "Submit",
+      cancel: "Cancel",
+      loading: "Loading...",
+      success: "Success!",
+      error: "Error",
+      required: "This field is required",
+      invalidEmail: "Please enter a valid email",
+      invalidPhone: "Please enter a valid phone number",
+    },
+  },
+  hi: {
+    nav: {
+      home: 'होम',
+      downloadApp: 'ऐप डाउनलोड करें',
+      becomeRider: 'चालक बनें',
+      bookRide: 'राइड बुक करें',
+      services: 'सेवाएं',
+      about: 'हमारे बारे में',
+      support: 'सहायता',
+      contact: 'संपर्क करें',
+    },
+    hero: {
+      headline: "Bihar का अपना mobility platform",
+      subtext: "Ride • Earn • Reserve • Grow",
+      downloadRiderApp: "ड्राइवर ऐप डाउनलोड करें",
+      downloadUserApp: "यूजर ऐप डाउनलोड करें",
+      registerAsDriver: "ड्राइवर के रूप में पंजीकृत करें",
+      bookRide: "राइड बुक करें",
+    },
+    whatIs: {
+      title: "BookMyGadi क्या है?",
+      subtitle: "Bihar के लिए आपका mobility partner",
+      services: [
+        {
+          title: "तुरंत राइड",
+          description: "Bihar में कहीं भी तुरंत राइड पाएं",
+        },
+        {
+          title: "आरक्षित राइड",
+          description: "अपनी सुविधा के लिए पहले से राइड बुक करें",
+        },
+        {
+          title: "इवेंट बुकिंग",
+          description: "शादियों और कार्यक्रमों के लिए विशेष परिवहन",
+        },
+        {
+          title: "शादी की गाड़ियां",
+          description: "आपके विशेष दिन के लिए लक्जरी गाड़ियां",
+        },
+        {
+          title: "ऑटो सेवा",
+          description: "किफायती ऑटो-रिक्शा राइड",
+        },
+        {
+          title: "बाइक सेवा",
+          description: "तेज और किफायती बाइक राइड",
+        },
+        {
+          title: "कार सेवा",
+          description: "आरामदायक कार यात्रा विकल्प",
+        },
+        {
+          title: "पिकअप सेवा",
+          description: "कार्गो और पिकअप वाहन सेवाएं",
+        },
+        {
+          title: "लॉरी सेवा",
+          description: "भारी सामान परिवहन",
+        },
+      ],
+    },
+    why: {
+      title: "BookMyGadi क्यों?",
+      subtitle: "Bihar के लिए डिजाइन किया गया platform",
+      benefits: [
+        {
+          title: "कोई पंजीकरण शुल्क नहीं",
+          description: "बिना किसी छिपे शुल्क के शुरुआत करें",
+        },
+        {
+          title: "कोई छिपा आयोग नहीं",
+          description: "सभी के लिए पारदर्शी मूल्य निर्धारण",
+        },
+        {
+          title: "स्थानीय दर राइड्स",
+          description: "स्थानीय लोगों द्वारा तय किए गए उचित कीमतें",
+        },
+        {
+          title: "अधिक आय",
+          description: "ड्राइवर्स के लिए बेहतर दरें",
+        },
+        {
+          title: "Bihar केंद्रित",
+          description: "Bihar के लिए बनाया गया, बिहारियों द्वारा",
+        },
+        {
+          title: "लचकदार मूल्य निर्धारण",
+          description: "अपनी दरें चुनें",
+        },
+      ],
+    },
+    earnings: {
+      title: "चालक कैसे कमाते हैं",
+      subtitle: "लचकदार आय के अवसर",
+      dailyEstimate: "दैनिक अनुमान",
+      monthlyEstimate: "मासिक अनुमान",
+      registerNow: "अभी पंजीकृत करें",
+      perRide: "प्रति राइड",
+      category: "श्रेणी",
+    },
+    download: {
+      title: "BookMyGadi डाउनलोड करें",
+      playStore: "Play Store से डाउनलोड करें",
+      apk: "APK डाउनलोड करें",
+      comingSoon: "जल्द आ रहा है",
+      scanQR: "QR कोड स्कैन करें",
+    },
+    register: {
+      title: "BookMyGadi के साथ शुरुआत करें",
+      userRegistration: "यूजर पंजीकरण",
+      riderRegistration: "चालक पंजीकरण",
+      businessRegistration: "व्यावसायिक पंजीकरण",
+      fleetOwnerRegistration: "फ्लीट मालिक पंजीकरण",
+      registerNow: "अभी पंजीकृत करें",
+    },
+    liveCounters: {
+      title: "BookMyGadi आंकड़े",
+      riders: "पंजीकृत चालक",
+      users: "सक्रिय उपयोगकर्ता",
+      cities: "शहर",
+      rides: "पूर्ण राइड्स",
+    },
+    about: {
+      title: "BookMyGadi के बारे में",
+      vision: "दृष्टिकोण",
+      mission: "मिशन",
+      story: "हमारी कहानी",
+      founderMessage: "संस्थापक का संदेश",
+    },
+    support: {
+      title: "सहायता और मदद",
+      faq: "अक्सर पूछे जाने वाले प्रश्न",
+      contactUs: "हमसे संपर्क करें",
+      whatsapp: "WhatsApp",
+      call: "कॉल करें",
+      email: "ईमेल",
+      submitTicket: "समर्थन टिकट जमा करें",
+    },
+    footer: {
+      privacy: "गोपनीयता नीति",
+      terms: "नियम और शर्तें",
+      refund: "रिफंड नीति",
+      careers: "करियर",
+      support: "सहायता",
+      followUs: "हमारा अनुसरण करें",
+      copyright: "© 2024 BookMyGadi. सर्वाधिकार सुरक्षित।",
+    },
+    forms: {
+      email: "ईमेल पता",
+      phone: "फोन नंबर",
+      password: "पासवर्ड",
+      name: "पूरा नाम",
+      city: "शहर",
+      submit: "जमा करें",
+      cancel: "रद्द करें",
+      loading: "लोड हो रहा है...",
+      success: "सफल!",
+      error: "त्रुटि",
+      required: "यह फील्ड आवश्यक है",
+      invalidEmail: "कृपया एक मान्य ईमेल दर्ज करें",
+      invalidPhone: "कृपया एक मान्य फोन नंबर दर्ज करें",
+    },
+  },
+};
+
+export type TranslationKey = keyof typeof translations.en;
+export type Translations = typeof translations;

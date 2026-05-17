@@ -1,9 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import PortalApp from "./portal/PortalApp";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import AppShell from "./components/layout/AppShell";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import LandingPage from "./pages/LandingPage";
 import HomePage from "./pages/app/HomePage";
 import PriceNegotiationPage from "./pages/app/PriceNegotiationPage";
 import TrackPage from "./pages/app/TrackPage";
@@ -38,10 +40,26 @@ import AdminV2Protected from "./admin_v2/components/AdminProtected";
 import { LocationGuard } from "./components/LocationGuard";
 
 const App = () => {
+  // Check if we're on the portal subdomain
+  const isPortal = () => {
+    const hostname = window.location.hostname;
+    return hostname.startsWith('web.') || hostname === 'web.bookmygadi.app';
+  };
+
+  // Render portal app for web.bookmygadi.app
+  if (isPortal()) {
+    return <PortalApp />;
+  }
+
+  // Render regular app for other subdomains/localhost
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
-        <Route path="/" element={<Navigate to="/app/home" replace />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/download" element={<LandingPage />} />
+        <Route path="/offers" element={<LandingPage />} />
+        <Route path="/partner" element={<LandingPage />} />
+        <Route path="/about" element={<LandingPage />} />
         <Route path="/admin" element={<Navigate to="/admin-v2" replace />} />
         <Route path="/admin/login" element={<LoginPage />} />
         <Route path="/admin-v2/login" element={<AdminV2LoginPage />} />

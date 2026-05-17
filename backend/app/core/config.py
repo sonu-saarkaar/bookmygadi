@@ -54,11 +54,6 @@ class Settings(BaseSettings):
     apitxt_template_id: str = ""
     bmg_return_otp_in_response: bool = False
 
-    # Google Play Integrity. Leave disabled until service-account JSON and cloud project are configured.
-    play_integrity_package_name: str = "com.bookmygadi.rider"
-    play_integrity_service_account_json: str = ""
-    play_integrity_enforce: bool = False
-
     model_config = SettingsConfigDict(
         env_file=_env_file_path(),
         env_file_encoding="utf-8",

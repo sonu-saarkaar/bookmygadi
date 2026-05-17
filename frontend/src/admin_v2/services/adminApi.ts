@@ -420,10 +420,9 @@ export const adminV2Api = {
         revenue: completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0),
         average_fare: completedRides.length > 0 ? completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) / completedRides.length : 0,
         paid: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length,
-      method: "cash",
-      status: (r.payment_status || "unpaid").toLowerCase() === "paid" ? "paid" : "pending",
-    }));
-    return { rows };
+        pending: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").length
+      };
+    }
   },
   payoutDriver: async (payment_id: string) => ({ ok: true, payment_id }),
 

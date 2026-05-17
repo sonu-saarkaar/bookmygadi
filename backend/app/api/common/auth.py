@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta
-import json
 import os
 import random
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -12,14 +10,123 @@ from email.mime.multipart import MIMEMultipart
 import string
 import secrets
 import httpx
-from pydantic import BaseModel, EmailStr, Field, model_validator
-from jose import jwt as jose_jwt
+from pydantic import BaseModel, EmailStr, Field
 
 from app.api.common.deps import get_current_user
 from app.core.config import settings
+from app.core.ids import next_user_public_id
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db import get_db
-from app.models import AuthOtp, Ride, User, RefreshToken
+from app.models import AuthOtp, User, RefreshToken
+from app.schemas import Token, UserCreate, UserLogin, UserRead, ForgotPasswordRequest, RefreshRequest
+import logging
+
+logger = logging.getLogger(__name__)
+
+from app.core.limiter import limiter
+from fastapi import Request
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+_RATE_LIMIT_BUCKET: dict[str, list[datetime]] = {}
+
+
+def _is_rate_limited(key: str, max_attempts: int, window_seconds: int) -> bool:
+    now = datetime.utcnow()
+    window_start = now - timedelta(seconds=window_seconds)
+    attempts = [ts for ts in _RATE_LIMIT_BUCKET.get(key, []) if ts >= window_start]
+    attempts.append(now)
+    _RATE_LIMIT_BUCKET[key] = attempts[-max_attempts * 3 :]
+    return len(attempts) > max_attempts
+
+def generate_temp_password(length=8):
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+def send_reset_email(to_email: str, name: str, new_password: str):
+    # ========================================================
+    # User Notification: 
+    # Use bookmygadi.in@gmail.com and generating an App password!
+    # ========================================================
+    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_PORT = 587
+    SENDER_EMAIL = "bookmygadi.in@gmail.com"       # <-- Your Email
+    # SENDER_PASSWORD is NOT your normal Gmail login password! 
+    # It MUST be a 16-character "App Password" generated in Google Settings.
+    SENDER_PASSWORD = os.getenv("BMG_SMTP_APP_PASSWORD", "").strip()
+    if not SENDER_PASSWORD:
+        raise Exception("SMTP app password is not configured")
+    
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = to_email
+    msg['Subject'] = "BookMyGadi - Your New Temporary Password"
+    
+    body = f"""
+    Hello {name},
+    
+    You recently requested to reset your password for your BookMyGadi account.
+    
+    We have securely generated a new temporary password for you to login with:
+    
+    Email: {to_email}
+    New Password: {new_password}
+    
+    Please sign in using this new password and remember to change it from your profile settings as soon as possible.
+    
+    Log in here: https://bookmygadi.com/login
+    
+    Regards,
+    The BookMyGadi Security Team
+    """
+    msg.attach(MIMEText(body, 'plain'))
+    
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"--- REAL EMAIL SUCCESSFULLY SENT TO: {to_email} ---")
+    except Exception as e:
+        print(f"--- FAILED TO SEND REAL EMAIL: {e} ---")
+        raise Exception(f"Failed to send email: {str(e)}")
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(
+        (User.email == payload.email_or_mobile) | (User.phone == payload.email_or_mobile)
+    ).first()
+
+    if not user:
+        # Return generic message to prevent account enumeration.
+        return {"message": "If an account exists, reset instructions have been processed."}
+
+    # 1. Generate a new secure temporary password
+    new_raw_password = generate_temp_password()
+    
+    # 2. Hash it and save it to the user's database record
+    user.password_hash = get_password_hash(new_raw_password)
+    
+
+    # 3. Send email to the user with the new temporary plaintext password
+    try:
+        send_reset_email(user.email, user.name, new_raw_password)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Password reset service is temporarily unavailable")
+
+    return {"message": "A new password has been sent to your Email. Please check your inbox."}
+
+@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+def register(payload: UserCreate, db: Session = Depends(get_db)) -> Token:
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    user = User(
+from app.db import get_db
+from app.models import AuthOtp, User, RefreshToken
 from app.schemas import Token, UserCreate, UserLogin, UserRead, ForgotPasswordRequest, RefreshRequest
 import logging
 
@@ -134,18 +241,30 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> Token:
         password_hash=get_password_hash(payload.password),
     )
     db.add(user)
+    db.flush() # Ensure user.id is available
+
+    # Handle referral if invite_code provided
+    if payload.invite_code:
+        from app.models import ReferralSettings, UserReferral
+        inviter = db.query(User).filter(User.public_id == payload.invite_code).first()
+        if inviter:
+            ref_settings = db.query(ReferralSettings).filter(ReferralSettings.id == "global_config").first()
+            if ref_settings and ref_settings.is_active:
+                new_ref = UserReferral(
+                    inviter_id=inviter.id,
+                    invitee_id=user.id,
+                    reward_amount=ref_settings.referrer_bonus,
+                    status="pending",
+                    notes=f"Referred by {inviter.name}"
+                )
+                db.add(new_ref)
+
     db.commit()
     db.refresh(user)
 
-    # Assign enterprise-style public IDs without breaking old UUID primary key.
+    # Assign clean BookMyGadi public ID without breaking old UUID primary key.
     if not user.public_id:
-        role_prefix = "USER" if user.role == "customer" else "RIDER" if user.role == "driver" else "ADMIN"
-        count = db.query(User).filter(User.role == user.role).count()
-        candidate = f"BMG-{role_prefix}-{count:03d}"
-        while db.query(User).filter(User.public_id == candidate).first():
-            count += 1
-            candidate = f"BMG-{role_prefix}-{count:03d}"
-        user.public_id = candidate
+        user.public_id = next_user_public_id(db, User)
         db.commit()
 
     token = create_access_token(subject=user.id, role=user.role)
@@ -155,8 +274,12 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> Token:
 @router.post("/login", response_model=Token)
 @limiter.limit("5/minute")
 def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -> Token:
-    identifier = (payload.identifier or payload.email or payload.phone or "").strip()
-    user = _find_user_by_identifier(db, identifier, role_restricted=False)
+    identifier = payload.email.lower().strip() if payload.email else payload.phone.strip()
+    
+    if payload.email:
+        user = db.query(User).filter(User.email == payload.email).first()
+    else:
+        user = db.query(User).filter(User.phone == payload.phone).first()
 
     if not user or not verify_password(payload.password, user.password_hash):
         logger.warning(f"Failed login attempt for {identifier}")
@@ -203,24 +326,6 @@ from app.schemas import UserUpdate
 
 @router.patch("/me", response_model=UserRead)
 def update_me(payload: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    has_profile_changes = any(
-        value is not None for value in (
-            payload.name,
-            payload.phone,
-            payload.city,
-            payload.bio,
-            payload.emergency_number,
-            payload.avatar_data,
-        )
-    )
-    if current_user.role in {"driver", "admin"} and has_profile_changes:
-        active_ride = db.query(Ride).filter(
-            Ride.driver_id == current_user.id,
-            Ride.status.in_(["accepted", "arriving", "in_progress"]),
-        ).first()
-        if active_ride:
-            raise HTTPException(status_code=409, detail="Profile details cannot be changed during an active ride")
-
     if payload.name is not None:
         current_user.name = payload.name
     if payload.phone is not None:
@@ -248,89 +353,6 @@ def update_fcm_token(payload: FcmTokenUpdate, current_user: User = Depends(get_c
     return {"message": "FCM token updated successfully"}
 
 
-class DeviceIntegrityPayload(BaseModel):
-    integrity_token: str = Field(min_length=20)
-    nonce: str = Field(min_length=16, max_length=500)
-    package_name: str = Field(min_length=3, max_length=120)
-
-
-async def _google_service_account_access_token() -> str | None:
-    if not settings.play_integrity_service_account_json:
-        return None
-    service_account = json.loads(settings.play_integrity_service_account_json)
-    now = int(time.time())
-    claims = {
-        "iss": service_account["client_email"],
-        "scope": "https://www.googleapis.com/auth/playintegrity",
-        "aud": service_account.get("token_uri", "https://oauth2.googleapis.com/token"),
-        "iat": now,
-        "exp": now + 3600,
-    }
-    assertion = jose_jwt.encode(claims, service_account["private_key"], algorithm="RS256")
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.post(
-            service_account.get("token_uri", "https://oauth2.googleapis.com/token"),
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                "assertion": assertion,
-            },
-        )
-        response.raise_for_status()
-        return response.json().get("access_token")
-
-
-def _integrity_result_ok(decoded: dict, expected_nonce: str, expected_package: str) -> bool:
-    token_payload = decoded.get("tokenPayloadExternal", {})
-    request_details = token_payload.get("requestDetails", {})
-    app_integrity = token_payload.get("appIntegrity", {})
-    device_integrity = token_payload.get("deviceIntegrity", {})
-    device_verdicts = set(device_integrity.get("deviceRecognitionVerdict", []) or [])
-    return (
-        request_details.get("nonce") == expected_nonce
-        and request_details.get("requestPackageName") == expected_package
-        and app_integrity.get("appRecognitionVerdict") == "PLAY_RECOGNIZED"
-        and bool(device_verdicts & {"MEETS_DEVICE_INTEGRITY", "MEETS_STRONG_INTEGRITY"})
-    )
-
-
-@router.post("/device-integrity")
-async def verify_device_integrity(
-    payload: DeviceIntegrityPayload,
-    current_user: User = Depends(get_current_user),
-) -> dict:
-    expected_package = settings.play_integrity_package_name
-    if payload.package_name != expected_package:
-        if settings.play_integrity_enforce:
-            raise HTTPException(status_code=403, detail="Invalid app package")
-        return {"message": "Device integrity package mismatch"}
-
-    access_token = await _google_service_account_access_token()
-    if not access_token:
-        # Rollout-safe: production can enable enforcement after env is configured.
-        return {"message": "Device integrity validation not configured"}
-
-    url = f"https://playintegrity.googleapis.com/v1/{expected_package}:decodeIntegrityToken"
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        response = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={"integrity_token": payload.integrity_token},
-        )
-    if response.status_code >= 400:
-        if settings.play_integrity_enforce:
-            raise HTTPException(status_code=403, detail="Device integrity validation failed")
-        logger.warning("Play Integrity decode failed for user %s: %s", current_user.id, response.text[:300])
-        return {"message": "Device integrity validation failed"}
-
-    decoded = response.json()
-    if not _integrity_result_ok(decoded, payload.nonce, expected_package):
-        if settings.play_integrity_enforce:
-            raise HTTPException(status_code=403, detail="Device integrity rejected")
-        logger.warning("Play Integrity rejected user %s", current_user.id)
-        return {"message": "Device integrity rejected"}
-    return {"message": "Device integrity verified"}
-
-
 class PhoneOtpStartPayload(BaseModel):
     phone: str
     role: str = "driver"
@@ -347,29 +369,8 @@ class PhoneOtpVerifyPayload(BaseModel):
     role: str = "driver"
 
 
-class PhoneOtpVerifyResponse(BaseModel):
-    access_token: str | None = None
-    refresh_token: str | None = None
-    token_type: str = "bearer"
-    role: str | None = None
-    pin_required: bool = False
-    registration_required: bool = False
-    message: str | None = None
-
-
 class RiderPinLoginPayload(BaseModel):
-    phone: str | None = None
-    identifier: str | None = Field(default=None, min_length=1, max_length=255)
-    pin: str = Field(min_length=4, max_length=100)
-
-    @model_validator(mode="after")
-    def check_identifier(self) -> "RiderPinLoginPayload":
-        if not self.phone and not self.identifier:
-            raise ValueError("Mobile, email, or rider ID is required")
-        return self
-
-
-class RiderSetPinPayload(BaseModel):
+    phone: str
     pin: str = Field(min_length=4, max_length=4)
 
 
@@ -378,7 +379,7 @@ class RiderPinRegisterPayload(BaseModel):
     last_name: str = Field(min_length=1, max_length=60)
     phone: str
     email: EmailStr
-    pin: str = Field(min_length=4, max_length=100)
+    pin: str = Field(min_length=4, max_length=4)
     avatar_data: str | None = None
 
 
@@ -389,30 +390,6 @@ def _normalize_phone(phone: str) -> str:
     if len(digits) != 10:
         raise HTTPException(status_code=400, detail="Valid 10 digit mobile number required")
     return digits
-
-
-def _looks_like_phone(value: str) -> bool:
-    digits = "".join(ch for ch in (value or "") if ch.isdigit())
-    return len(digits) >= 10
-
-
-def _find_user_by_identifier(db: Session, identifier: str, role_restricted: bool = True) -> User | None:
-    value = (identifier or "").strip()
-    if not value:
-        return None
-
-    query = db.query(User)
-    if role_restricted:
-        query = query.filter(User.role.in_(["driver", "admin"]))
-
-    if "@" in value:
-        return query.filter(User.email == value.lower()).first()
-
-    if _looks_like_phone(value):
-        return query.filter(User.phone == _normalize_phone(value)).first()
-
-    normalized_public_id = value.upper()
-    return query.filter(User.public_id == normalized_public_id).first()
 
 
 def _otp_identity(phone: str) -> str:
@@ -428,35 +405,18 @@ def _issue_token_for_user(user: User, db: Session) -> Token:
     return Token(access_token=token, refresh_token=refresh_token_val, role=user.role)
 
 
-def _issue_phone_otp_response(user: User, db: Session) -> PhoneOtpVerifyResponse:
-    token = _issue_token_for_user(user, db)
-    return PhoneOtpVerifyResponse(
-        access_token=token.access_token,
-        refresh_token=token.refresh_token,
-        role=token.role,
-        pin_required=not bool(getattr(user, "pin_enabled", False)),
-        message="OTP verified successfully.",
-    )
-
-
 def _assign_public_id(user: User, db: Session) -> None:
     if user.public_id:
         return
-    role_prefix = "USER" if user.role == "customer" else "RIDER" if user.role == "driver" else "ADMIN"
-    count = db.query(User).filter(User.role == user.role).count()
-    candidate = f"BMG-{role_prefix}-{count:03d}"
-    while db.query(User).filter(User.public_id == candidate).first():
-        count += 1
-        candidate = f"BMG-{role_prefix}-{count:03d}"
-    user.public_id = candidate
+    user.public_id = next_user_public_id(db, User)
 
 
 @router.post("/rider/register-pin", response_model=Token, status_code=status.HTTP_201_CREATED)
 def register_rider_with_pin(payload: RiderPinRegisterPayload, db: Session = Depends(get_db)) -> Token:
     phone = _normalize_phone(payload.phone)
-    pin = payload.pin.strip()
-    if len(pin) < 4:
-        raise HTTPException(status_code=400, detail="PIN/password must be at least 4 characters")
+    pin = "".join(ch for ch in payload.pin if ch.isdigit())
+    if len(pin) != 4:
+        raise HTTPException(status_code=400, detail="4 digit PIN required")
 
     existing_email = db.query(User).filter(User.email == payload.email).first()
     if existing_email:
@@ -464,7 +424,7 @@ def register_rider_with_pin(payload: RiderPinRegisterPayload, db: Session = Depe
 
     existing_rider = db.query(User).filter(
         User.phone == phone,
-        User.role.in_(["driver", "admin"]),
+        User.role.in_({"driver", "admin"}),
     ).first()
     if existing_rider:
         raise HTTPException(status_code=409, detail="Rider account already exists for this mobile number")
@@ -478,11 +438,27 @@ def register_rider_with_pin(payload: RiderPinRegisterPayload, db: Session = Depe
         driver_status="offline",
         avatar_data=payload.avatar_data,
         password_hash=get_password_hash(pin),
-        pin_enabled=True,
     )
     db.add(user)
     db.flush()
     _assign_public_id(user, db)
+    
+    # Handle referral for riders
+    if payload.invite_code:
+        from app.models import ReferralSettings, UserReferral
+        inviter = db.query(User).filter(User.public_id == payload.invite_code).first()
+        if inviter:
+            ref_settings = db.query(ReferralSettings).filter(ReferralSettings.id == "global_config").first()
+            if ref_settings and ref_settings.is_active:
+                new_ref = UserReferral(
+                    inviter_id=inviter.id,
+                    invitee_id=user.id,
+                    reward_amount=ref_settings.referrer_bonus,
+                    status="pending",
+                    notes=f"Rider referral by {inviter.name}"
+                )
+                db.add(new_ref)
+
     db.commit()
     db.refresh(user)
     return _issue_token_for_user(user, db)
@@ -491,38 +467,19 @@ def register_rider_with_pin(payload: RiderPinRegisterPayload, db: Session = Depe
 @router.post("/rider/pin-login", response_model=Token)
 @limiter.limit("8/minute")
 def rider_pin_login(request: Request, payload: RiderPinLoginPayload, db: Session = Depends(get_db)) -> Token:
-    identifier = (payload.identifier or payload.phone or "").strip()
-    pin = payload.pin.strip()
-    if len(pin) < 4:
-        raise HTTPException(status_code=400, detail="PIN/password must be at least 4 characters")
-
-    user = _find_user_by_identifier(db, identifier, role_restricted=True)
-    if not user or not bool(getattr(user, "pin_enabled", False)) or not verify_password(pin, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid rider ID, mobile/email, or PIN/password")
-
-    return _issue_token_for_user(user, db)
-
-
-@router.post("/rider/set-pin")
-def rider_set_pin(payload: RiderSetPinPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _save_rider_pin(payload, current_user, db)
-
-
-@router.post("/rider/change-pin")
-def rider_change_pin(payload: RiderSetPinPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _save_rider_pin(payload, current_user, db)
-
-
-def _save_rider_pin(payload: RiderSetPinPayload, current_user: User, db: Session) -> dict:
-    if current_user.role not in {"driver", "admin"}:
-        raise HTTPException(status_code=403, detail="Driver access required")
+    phone = _normalize_phone(payload.phone)
     pin = "".join(ch for ch in payload.pin if ch.isdigit())
     if len(pin) != 4:
         raise HTTPException(status_code=400, detail="4 digit PIN required")
-    current_user.password_hash = get_password_hash(pin)
-    current_user.pin_enabled = True
-    db.commit()
-    return {"message": "PIN saved successfully."}
+
+    user = db.query(User).filter(
+        User.phone == phone,
+        User.role.in_({"driver", "admin"}),
+    ).first()
+    if not user or not verify_password(pin, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid mobile number or PIN")
+
+    return _issue_token_for_user(user, db)
 
 
 def _send_apitxt_otp(phone: str, otp: str) -> bool:
@@ -537,12 +494,10 @@ def _send_apitxt_otp(phone: str, otp: str) -> bool:
         return False
 
     mobile = phone if phone.startswith(country) else f"{country}{phone}"
-    message = _build_rider_otp_message(otp)
     params = {
         "authkey": authkey,
         "mobile": mobile,
         "otp": otp,
-        "message": message,
         "channel": channel,
         "country": country,
     }
@@ -572,22 +527,16 @@ def _send_apitxt_otp(phone: str, otp: str) -> bool:
     return False
 
 
-def _build_rider_otp_message(otp: str) -> str:
-    return (
-        "Welcome to BookMyGadi Rider\n\n"
-        f"Login OTP: {otp}\n\n"
-        "100% earning • No commission\n\n"
-        "OTP valid: 5 mins\n"
-        "Do not share.\n\n"
-        "bookmygadi.app"
-    )
-
-
 @router.post("/otp/start", response_model=PhoneOtpStartResponse)
 def start_phone_otp(payload: PhoneOtpStartPayload, db: Session = Depends(get_db)):
     phone = _normalize_phone(payload.phone)
     if _is_rate_limited(f"otp-start:{phone}", max_attempts=5, window_seconds=600):
         raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
+
+    allowed_roles = {"driver", "admin"} if payload.role == "driver" else {payload.role}
+    user = db.query(User).filter(User.phone == phone, User.role.in_(allowed_roles)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Rider account not found for this mobile number")
 
     db.query(AuthOtp).filter(
         AuthOtp.email == _otp_identity(phone),
@@ -618,8 +567,8 @@ def start_phone_otp(payload: PhoneOtpStartPayload, db: Session = Depends(get_db)
     return PhoneOtpStartResponse(message=message, dev_otp=dev_otp)
 
 
-@router.post("/otp/verify", response_model=PhoneOtpVerifyResponse)
-def verify_phone_otp(payload: PhoneOtpVerifyPayload, db: Session = Depends(get_db)) -> PhoneOtpVerifyResponse:
+@router.post("/otp/verify", response_model=Token)
+def verify_phone_otp(payload: PhoneOtpVerifyPayload, db: Session = Depends(get_db)):
     phone = _normalize_phone(payload.phone)
     if _is_rate_limited(f"otp-verify:{phone}", max_attempts=10, window_seconds=600):
         raise HTTPException(status_code=429, detail="Too many OTP attempts. Try again later.")
@@ -645,15 +594,10 @@ def verify_phone_otp(payload: PhoneOtpVerifyPayload, db: Session = Depends(get_d
     allowed_roles = {"driver", "admin"} if payload.role == "driver" else {payload.role}
     user = db.query(User).filter(User.phone == phone, User.role.in_(allowed_roles)).first()
     if not user:
-        row.is_used = True
-        db.commit()
-        return PhoneOtpVerifyResponse(
-            registration_required=True,
-            message="OTP verified. Create your rider profile.",
-        )
+        raise HTTPException(status_code=404, detail="Rider account not found")
 
     row.is_used = True
-    return _issue_phone_otp_response(user, db)
+    return _issue_token_for_user(user, db)
 
 
 class AdminForgotStartPayload(BaseModel):

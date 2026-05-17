@@ -173,39 +173,3 @@ async def notify_ride_cancelled(
             "channel": "RIDE_STATUS",
         },
     )
-
-
-async def notify_vehicle_registration_status(
-    fcm_token: str | None,
-    *,
-    registration_id: str,
-    status: str,
-    vehicle_name: str | None = None,
-    admin_note: str | None = None,
-) -> None:
-    if not fcm_token:
-        return
-    status_text = status.replace("_", " ").title()
-    title = "Gadi Approved" if status == "approved" else "Gadi Registration Update"
-    body = (
-        f"{vehicle_name or 'Your gadi'} is approved. You can now go on duty and receive rides."
-        if status == "approved"
-        else f"{vehicle_name or 'Your gadi'} status is {status_text}. Please check details in the rider app."
-    )
-    await _send_fcm(
-        token=fcm_token,
-        title=title,
-        body=body,
-        data={
-            "event": "VEHICLE_REGISTRATION_STATUS",
-            "ride_id": registration_id,
-            "id": registration_id,
-            "registration_id": registration_id,
-            "status": status,
-            "title": title,
-            "body": body,
-            "admin_note": admin_note or "",
-            "screen": "vehicle-registration",
-            "channel": "RIDE_STATUS",
-        },
-    )

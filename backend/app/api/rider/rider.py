@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.common.deps import get_admin_user, decode_access_token
 from app.api.common.realtime import realtime_manager
 from app.core.config import settings
+from app.core.ids import public_payment_id
 from app.core.notifications import (
     notify_ride_accepted,
     notify_driver_arriving,
@@ -16,7 +17,7 @@ from app.core.notifications import (
     notify_ride_completed,
 )
 from app.db import get_db
-from app.models import Ride, RideMessage, RideNegotiation, RiderApiKey, RiderSchedule, RiderVehicleRegistration, User
+from app.models import Ride, RideMessage, RideNegotiation, RiderApiKey, RiderSchedule, User
 from app.schemas import (
     LocationUpdate,
     PaymentReceiveRead,
@@ -68,20 +69,6 @@ def _parse_flexible_datetime(raw: str | None) -> datetime | None:
         return None
 
 
-def _driver_has_approved_vehicle(db: Session, driver_id: str | None) -> bool:
-    if not driver_id:
-        return False
-    return (
-        db.query(RiderVehicleRegistration.id)
-        .filter(
-            RiderVehicleRegistration.driver_id == driver_id,
-            RiderVehicleRegistration.status == "approved",
-        )
-        .first()
-        is not None
-    )
-
-
 def _distance_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
     from math import atan2, cos, radians, sin, sqrt
 
@@ -124,6 +111,7 @@ def _validate_location_payload(ride: Ride, payload: LocationUpdate) -> tuple[flo
 def _tracking_payload(ride: Ride) -> RideTrackingRead:
     return RideTrackingRead(
         ride_id=ride.id,
+        booking_display_id=ride.booking_display_id,
         status=ride.status,
         pickup_location=ride.pickup_location,
         destination=ride.destination,
@@ -181,7 +169,6 @@ def _rider_request_payload(db: Session, ride: Ride) -> RiderRideRequest:
         start_otp=ride.start_otp,
         preference=pref,
         created_at=ride.created_at,
-        updated_at=ride.updated_at,
     )
 
 
@@ -318,9 +305,6 @@ def list_rider_requests(
     api_key: RiderAuthType = Depends(_validate_rider_api_key),
     db: Session = Depends(get_db),
 ) -> list[RiderRideRequest]:
-    if not _driver_has_approved_vehicle(db, api_key.driver_id):
-        return []
-
     blocked_dates: set[date] = set()
     if api_key.driver_id:
         blocked_rows = (
@@ -337,7 +321,7 @@ def list_rider_requests(
         db.query(Ride)
         .options(selectinload(Ride.preference))
         .filter(Ride.status == "pending")
-        .order_by(Ride.updated_at.desc(), Ride.created_at.desc())
+        .order_by(Ride.created_at.asc())
         .all()
     )
     out: list[RiderRideRequest] = []
@@ -377,7 +361,6 @@ def list_rider_requests(
                 start_otp=row.start_otp,
                 preference=row.preference,
                 created_at=row.created_at,
-                updated_at=row.updated_at,
             )
         )
     return out
@@ -533,8 +516,6 @@ async def accept_rider_request(
         raise HTTPException(status_code=409, detail=f"Ride already {ride.status}")
     if not api_key.driver_id:
         raise HTTPException(status_code=403, detail="Driver account not linked. Please login again.")
-    if not _driver_has_approved_vehicle(db, api_key.driver_id):
-        raise HTTPException(status_code=403, detail="Vehicle approval required before accepting rides")
     if api_key.driver_id:
         active_ride = (
             db.query(Ride)
@@ -570,32 +551,19 @@ async def accept_rider_request(
             if max(start_a, start_b) < min(end_a, end_b):
                 raise HTTPException(status_code=409, detail="Overlapping reserve booking not allowed for this driver")
 
-    accepted_at = datetime.utcnow()
-    updates = {
-        "status": "accepted",
-        "driver_id": api_key.driver_id,
-        "accepted_at": accepted_at,
-    }
+    ride.status = "accepted"
+    ride.driver_id = api_key.driver_id
+    ride.accepted_at = datetime.utcnow()
     if payload.agreed_fare is not None:
-        updates["agreed_fare"] = payload.agreed_fare
-
-    updated_count = (
-        db.query(Ride)
-        .filter(Ride.id == ride_id, Ride.status == "pending", Ride.driver_id.is_(None))
-        .update(updates, synchronize_session=False)
-    )
-    if updated_count != 1:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Ride already accepted by another rider")
+        ride.agreed_fare = payload.agreed_fare
 
     db.commit()
+    db.refresh(ride)
 
     full_ride = db.query(Ride).options(
         selectinload(Ride.preference),
         selectinload(Ride.driver).selectinload(User.vehicle_registrations)
     ).filter(Ride.id == ride.id).first()
-    if not full_ride:
-        raise HTTPException(status_code=404, detail="Ride not found")
 
     response_payload = _rider_request_payload(db, full_ride)
 
@@ -657,16 +625,8 @@ async def rider_counter_offer(
         raise HTTPException(status_code=404, detail="Ride not found")
     if ride.status != "pending":
         raise HTTPException(status_code=409, detail=f"Ride already {ride.status}")
-    if not _driver_has_approved_vehicle(db, api_key.driver_id):
-        raise HTTPException(status_code=403, detail="Vehicle approval required before sending offers")
     if payload.agreed_fare is None:
         raise HTTPException(status_code=400, detail="agreed_fare is required for negotiation")
-    min_fare = ride.estimated_fare_min
-    max_fare = ride.estimated_fare_max
-    if min_fare is not None and payload.agreed_fare < min_fare:
-        raise HTTPException(status_code=400, detail=f"Offer must be at least ₹{min_fare}")
-    if max_fare is not None and payload.agreed_fare > max_fare:
-        raise HTTPException(status_code=400, detail=f"Offer cannot be more than ₹{max_fare}")
 
     db.query(RideNegotiation).filter(
         RideNegotiation.ride_id == ride_id,
@@ -681,10 +641,8 @@ async def rider_counter_offer(
         status="pending",
     )
     db.add(row)
-    ride.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
-    db.refresh(ride)
 
     await realtime_manager.broadcast(
         ride.id,
@@ -728,7 +686,6 @@ async def rider_counter_offer(
         start_otp=ride.start_otp,
         preference=ride.preference,
         created_at=ride.created_at,
-        updated_at=ride.updated_at,
     )
 
 
@@ -868,9 +825,11 @@ def receive_payment(
         raise HTTPException(status_code=409, detail="Ride must be completed before payment")
 
     ride.payment_status = "paid"
+    if not ride.payment_public_id:
+        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
     db.commit()
     db.refresh(ride)
-    return PaymentReceiveRead(ride_id=ride.id, payment_status=ride.payment_status, status=ride.status)
+    return PaymentReceiveRead(ride_id=ride.id, payment_public_id=ride.payment_public_id, payment_status=ride.payment_status, status=ride.status)
 
 
 @router.post("/active/{ride_id}/feedback")

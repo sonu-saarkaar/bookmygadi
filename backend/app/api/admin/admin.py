@@ -54,6 +54,25 @@ class RideCancelPayload(BaseModel):
     reason: str | None = None
 
 
+def _resolve_driver_identifier(db: Session, identifier: str) -> User | None:
+    value = (identifier or "").strip()
+    if not value:
+        return None
+    driver = db.get(User, value)
+    if not driver:
+        driver = db.query(User).filter(User.public_id == value).first()
+    if not driver:
+        registration = (
+            db.query(RiderVehicleRegistration)
+            .filter(RiderVehicleRegistration.rider_id_format == value)
+            .order_by(RiderVehicleRegistration.created_at.desc())
+            .first()
+        )
+        if registration:
+            driver = db.get(User, registration.driver_id)
+    return driver if driver and driver.role == "driver" else None
+
+
 def _log_admin_action(db: Session, admin: User, module: str, action: str, status: str = "success") -> None:
     db.add(
         AdminAuditLog(
@@ -69,6 +88,37 @@ def _log_admin_action(db: Session, admin: User, module: str, action: str, status
 
 def _ride_price_value(ride: Ride) -> int:
     return int(ride.agreed_fare or ride.requested_fare or ride.estimated_fare_max or ride.estimated_fare_min or 0)
+
+
+def _admin_ride_read(ride: Ride) -> AdminRideOpsRead:
+    return AdminRideOpsRead(
+        id=ride.id,
+        public_id=ride.public_id,
+        booking_display_id=ride.booking_display_id,
+        payment_public_id=ride.payment_public_id,
+        customer_id=ride.customer_id,
+        customer_public_id=ride.customer.public_id if ride.customer else None,
+        customer_name=ride.customer.name if ride.customer else None,
+        customer_phone=ride.customer.phone if ride.customer else None,
+        customer_email=ride.customer.email if ride.customer else None,
+        driver_id=ride.driver_id,
+        driver_public_id=ride.driver.public_id if ride.driver else None,
+        driver_name=ride.driver.name if ride.driver else None,
+        driver_phone=ride.driver.phone if ride.driver else None,
+        pickup_location=ride.pickup_location,
+        destination=ride.destination,
+        pickup_area=ride.preference.pickup_area if ride.preference else None,
+        vehicle_type=ride.vehicle_type,
+        status=ride.status,
+        payment_status=ride.payment_status,
+        requested_fare=ride.requested_fare,
+        agreed_fare=ride.agreed_fare,
+        estimated_fare_min=ride.estimated_fare_min,
+        estimated_fare_max=ride.estimated_fare_max,
+        urgency_type=ride.preference.urgency_type if ride.preference else None,
+        created_at=ride.created_at,
+        updated_at=ride.updated_at,
+    )
 
 
 def _build_dashboard(db: Session) -> AdminDashboardRead:
@@ -262,37 +312,18 @@ def admin_rides(
         query = query.filter(func.lower(Ride.status) == status.lower().strip())
     if q:
         key = f"%{q.strip()}%"
-        query = query.filter(or_(Ride.pickup_location.ilike(key), Ride.destination.ilike(key), Ride.id.ilike(key)))
-
-    rows = query.limit(limit).all()
-    out: list[AdminRideOpsRead] = []
-    for ride in rows:
-        out.append(
-            AdminRideOpsRead(
-                id=ride.id,
-                customer_id=ride.customer_id,
-                customer_name=ride.customer.name if ride.customer else None,
-                customer_phone=ride.customer.phone if ride.customer else None,
-                customer_email=ride.customer.email if ride.customer else None,
-                driver_id=ride.driver_id,
-                driver_name=ride.driver.name if ride.driver else None,
-                driver_phone=ride.driver.phone if ride.driver else None,
-                pickup_location=ride.pickup_location,
-                destination=ride.destination,
-                pickup_area=ride.preference.pickup_area if ride.preference else None,
-                vehicle_type=ride.vehicle_type,
-                status=ride.status,
-                payment_status=ride.payment_status,
-                requested_fare=ride.requested_fare,
-                agreed_fare=ride.agreed_fare,
-                estimated_fare_min=ride.estimated_fare_min,
-                estimated_fare_max=ride.estimated_fare_max,
-                urgency_type=ride.preference.urgency_type if ride.preference else None,
-                created_at=ride.created_at,
-                updated_at=ride.updated_at,
+        query = query.filter(
+            or_(
+                Ride.pickup_location.ilike(key),
+                Ride.destination.ilike(key),
+                Ride.id.ilike(key),
+                Ride.public_id.ilike(key),
+                Ride.payment_public_id.ilike(key),
             )
         )
-    return out
+
+    rows = query.limit(limit).all()
+    return [_admin_ride_read(ride) for ride in rows]
 
 
 @router.patch("/rides/{ride_id}/assign-driver", response_model=AdminRideOpsRead)
@@ -305,13 +336,13 @@ def admin_assign_driver_to_ride(
     ride = (
         db.query(Ride)
         .options(joinedload(Ride.customer), joinedload(Ride.driver), joinedload(Ride.preference))
-        .filter(Ride.id == ride_id)
+        .filter(or_(Ride.id == ride_id, Ride.public_id == ride_id))
         .first()
     )
     if not ride:
         raise HTTPException(status_code=404, detail="Ride not found")
-    driver = db.get(User, payload.driver_id)
-    if not driver or driver.role != "driver":
+    driver = _resolve_driver_identifier(db, payload.driver_id)
+    if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
     ride.driver_id = driver.id
@@ -326,33 +357,11 @@ def admin_assign_driver_to_ride(
         db,
         admin,
         "rides",
-        f"Assigned driver {driver.id} to ride {ride.id}. note={payload.note or ''}".strip(),
+        f"Assigned driver {driver.public_id or driver.id} to ride {ride.public_id or ride.id}. note={payload.note or ''}".strip(),
     )
     db.commit()
     db.refresh(ride)
-    return AdminRideOpsRead(
-        id=ride.id,
-        customer_id=ride.customer_id,
-        customer_name=ride.customer.name if ride.customer else None,
-        customer_phone=ride.customer.phone if ride.customer else None,
-        customer_email=ride.customer.email if ride.customer else None,
-        driver_id=ride.driver_id,
-        driver_name=ride.driver.name if ride.driver else None,
-        driver_phone=ride.driver.phone if ride.driver else None,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        pickup_area=ride.preference.pickup_area if ride.preference else None,
-        vehicle_type=ride.vehicle_type,
-        status=ride.status,
-        payment_status=ride.payment_status,
-        requested_fare=ride.requested_fare,
-        agreed_fare=ride.agreed_fare,
-        estimated_fare_min=ride.estimated_fare_min,
-        estimated_fare_max=ride.estimated_fare_max,
-        urgency_type=ride.preference.urgency_type if ride.preference else None,
-        created_at=ride.created_at,
-        updated_at=ride.updated_at,
-    )
+    return _admin_ride_read(ride)
 
 
 @router.patch("/rides/{ride_id}/cancel", response_model=AdminRideOpsRead)
@@ -375,29 +384,7 @@ def admin_cancel_ride(
     _log_admin_action(db, admin, "rides", f"Cancelled ride {ride.id}. reason={(payload.reason if payload else '') or 'not_provided'}", "warning")
     db.commit()
     db.refresh(ride)
-    return AdminRideOpsRead(
-        id=ride.id,
-        customer_id=ride.customer_id,
-        customer_name=ride.customer.name if ride.customer else None,
-        customer_phone=ride.customer.phone if ride.customer else None,
-        customer_email=ride.customer.email if ride.customer else None,
-        driver_id=ride.driver_id,
-        driver_name=ride.driver.name if ride.driver else None,
-        driver_phone=ride.driver.phone if ride.driver else None,
-        pickup_location=ride.pickup_location,
-        destination=ride.destination,
-        pickup_area=ride.preference.pickup_area if ride.preference else None,
-        vehicle_type=ride.vehicle_type,
-        status=ride.status,
-        payment_status=ride.payment_status,
-        requested_fare=ride.requested_fare,
-        agreed_fare=ride.agreed_fare,
-        estimated_fare_min=ride.estimated_fare_min,
-        estimated_fare_max=ride.estimated_fare_max,
-        urgency_type=ride.preference.urgency_type if ride.preference else None,
-        created_at=ride.created_at,
-        updated_at=ride.updated_at,
-    )
+    return _admin_ride_read(ride)
 
 
 @router.get("/users", response_model=list[AdminUserOpsRead])
@@ -466,6 +453,7 @@ def admin_users(
         out.append(
             AdminUserOpsRead(
                 id=user.id,
+                public_id=user.public_id,
                 name=user.name,
                 email=user.email,
                 phone=user.phone,
@@ -565,6 +553,7 @@ def admin_riders(
     return [
         {
             "id": row.id,
+            "public_id": row.public_id,
             "name": row.name,
             "phone": row.phone,
             "city": "-",
@@ -612,17 +601,27 @@ def admin_drivers(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     rows = db.query(User).filter(User.role == "driver").order_by(User.created_at.desc()).limit(250).all()
-    return [
-        {
-            "id": row.id,
-            "name": row.name,
-            "phone": row.phone,
-            "city": "-",
-            "rating": 4.6,
-            "status": row.driver_status or "pending_review",
-        }
-        for row in rows
-    ]
+    out: list[dict] = []
+    for row in rows:
+        registration = (
+            db.query(RiderVehicleRegistration)
+            .filter(RiderVehicleRegistration.driver_id == row.id, RiderVehicleRegistration.rider_id_format.isnot(None))
+            .order_by(RiderVehicleRegistration.updated_at.desc())
+            .first()
+        )
+        out.append(
+            {
+                "id": row.id,
+                "public_id": row.public_id,
+                "rider_id_format": registration.rider_id_format if registration else None,
+                "name": row.name,
+                "phone": row.phone,
+                "city": "-",
+                "rating": 4.6,
+                "status": row.driver_status or "pending_review",
+            }
+        )
+    return out
 
 
 @router.post("/drivers/{user_id}/approve", response_model=dict)

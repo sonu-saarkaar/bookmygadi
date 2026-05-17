@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.api.common.deps import get_admin_user
 from app.core.security import decode_access_token
-from app.models import User, CRMDriver, CRMTeamMember, CRMDriverAssignment, CRMDriverLog, CRMReferral
+from app.models import User, CRMDriver, CRMTeamMember, CRMDriverAssignment, CRMDriverLog, CRMReferral, BroadcastCampaign, ReferralSettings, UserReferral
 from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
+from app.core.notifications import _send_bulk_fcm
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -69,6 +70,20 @@ class ActionRequest(BaseModel):
 
 class BlockRequest(BaseModel):
     reason: str
+
+class BroadcastRequest(BaseModel):
+    title: str
+    message: str
+    target_audience: str # all, users, riders
+    image_url: Optional[str] = None
+    channel: str = "push"
+
+class ReferralSettingsUpdate(BaseModel):
+    is_active: bool
+    signup_bonus: int
+    referrer_bonus: int
+    max_referrals_per_user: int
+    terms: Optional[str] = None
 
 # --- Helper ---
 def log_action(db: Session, driver_id: str, action: str, admin_name: str):
@@ -239,6 +254,97 @@ def dashboard_analytics(_: User = Depends(get_admin_user), db: Session = Depends
         "approved_drivers": approved,
         "rejected_drivers": rejected,
         "blocked_drivers": blocked,
+    }
+
+@router.post("/broadcast")
+async def send_broadcast(payload: BroadcastRequest, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    # 1. Fetch target FCM tokens
+    tokens_query = db.query(User.fcm_token).filter(User.fcm_token.isnot(None))
+    if payload.target_audience == "users":
+        tokens_query = tokens_query.filter(User.role == "customer")
+    elif payload.target_audience == "riders":
+        tokens_query = tokens_query.filter(User.role == "driver")
+    
+    tokens = [t[0] for t in tokens_query.all()]
+    
+    # 2. Send via FCM
+    sent_count = 0
+    if tokens:
+        sent_count = await _send_bulk_fcm(
+            tokens=tokens,
+            title=payload.title,
+            body=payload.message,
+            data={"image": payload.image_url} if payload.image_url else None
+        )
+    
+    # 3. Save to campaign history
+    campaign = BroadcastCampaign(
+        title=payload.title,
+        message=payload.message,
+        image_url=payload.image_url,
+        target_audience=payload.target_audience,
+        channel=payload.channel,
+        sent_count=sent_count,
+        created_by=admin.name,
+        status="sent" if sent_count > 0 else "failed"
+    )
+    db.add(campaign)
+    db.commit()
+    
+    return {"ok": True, "sent_count": sent_count}
+
+@router.get("/broadcasts", response_model=List[dict])
+def list_broadcasts(_: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    campaigns = db.query(BroadcastCampaign).order_by(BroadcastCampaign.created_at.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "title": c.title,
+            "message": c.message,
+            "target": c.target_audience,
+            "sent_count": c.sent_count,
+            "created_at": c.created_at,
+            "status": c.status
+        } for c in campaigns
+    ]
+
+@router.get("/referral/settings")
+def get_referral_settings(_: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    settings = db.query(ReferralSettings).filter(ReferralSettings.id == "global_config").first()
+    if not settings:
+        settings = ReferralSettings(id="global_config")
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+@router.post("/referral/settings")
+def update_referral_settings(payload: ReferralSettingsUpdate, _: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    settings = db.query(ReferralSettings).filter(ReferralSettings.id == "global_config").first()
+    if not settings:
+        settings = ReferralSettings(id="global_config")
+        db.add(settings)
+    
+    settings.is_active = payload.is_active
+    settings.signup_bonus = payload.signup_bonus
+    settings.referrer_bonus = payload.referrer_bonus
+    settings.max_referrals_per_user = payload.max_referrals_per_user
+    settings.terms = payload.terms
+    
+    db.commit()
+    return {"ok": True}
+
+@router.get("/referral/stats")
+def get_referral_stats(_: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    total_referrals = db.query(UserReferral).count()
+    rewarded_referrals = db.query(UserReferral).filter(UserReferral.status == "rewarded").count()
+    total_distributed = db.query(UserReferral).filter(UserReferral.status == "rewarded").with_entities(UserReferral.reward_amount).all()
+    total_amt = sum(float(r[0]) for r in total_distributed)
+    
+    return {
+        "total_referrals": total_referrals,
+        "rewarded_count": rewarded_referrals,
+        "total_distributed_amount": total_amt
     }
 
 @router.post("/seed")
