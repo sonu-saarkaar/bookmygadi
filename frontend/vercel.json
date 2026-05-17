@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/api/v1/:path*",
+      "destination": "https://api.bookmygadi.app/api/v1/:path*"
+    },
+    {
+      "source": "/downloads/app-releases/:path*",
+      "destination": "https://api.bookmygadi.app/downloads/app-releases/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

@@ -1,4 +1,9 @@
-const DEFAULT_API_BASE_URL = "http://localhost";
+const PRODUCTION_API_BASE_URL = "https://api.bookmygadi.app";
+
+const getBrowserOrigin = (): string | null => {
+  if (typeof window === "undefined") return null;
+  return window.location.origin;
+};
 
 const normalizeBaseUrl = (value: string): string | null => {
   try {
@@ -9,9 +14,15 @@ const normalizeBaseUrl = (value: string): string | null => {
 };
 
 export const resolveApiBaseUrl = (envUrl?: string): string => {
-  const fallback = normalizeBaseUrl(envUrl || DEFAULT_API_BASE_URL) || DEFAULT_API_BASE_URL;
+  const configured = normalizeBaseUrl(envUrl || "");
+  if (configured) return configured;
 
-  return fallback;
+  const browserOrigin = getBrowserOrigin();
+  if (browserOrigin?.includes("bookmygadi.app")) {
+    return PRODUCTION_API_BASE_URL;
+  }
+
+  return "http://localhost:8000";
 };
 
 export const toWebSocketUrl = (apiBaseUrl: string, path: string): string | null => {
