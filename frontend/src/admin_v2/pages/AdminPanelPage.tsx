@@ -21,6 +21,7 @@ import { EnterpriseDashboard } from "@/admin_v2/components/EnterpriseDashboard";
 import { FinanceSettlementBoard } from "@/admin_v2/components/FinanceSettlementBoard";
 import { DailyEarningsReport } from "@/admin_v2/components/DailyEarningsReport";
 import { BroadcastManagementBoard } from "@/admin_v2/components/BroadcastManagementBoard";
+import { AppReleaseManagementBoard } from "@/admin_v2/components/AppReleaseManagementBoard";
 
 const toneForStatus = (status?: string) => {
   const s = (status || "").toLowerCase();
@@ -379,6 +380,7 @@ export const AdminV2PanelPage = () => {
     if (module === "policies") return <PolicyManagementBoard />;
     if (module === "support") return <SupportDeskBoard />;
     if (module === "broadcast") return <BroadcastManagementBoard />;
+    if (module === "app-downloads") return <AppReleaseManagementBoard />;
 
     if (module === "registrations") return (
       <div className="space-y-4">

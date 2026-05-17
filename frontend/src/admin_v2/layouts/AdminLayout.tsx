@@ -48,6 +48,7 @@ const menuGroups = [
   {
     title: "Marketing & Growth",
     items: [
+      { key: "app-downloads", label: "App Downloads", icon: Lucide.UploadCloud },
       { key: "broadcast", label: "Broadcast System", icon: Lucide.Megaphone },
     ],
   },

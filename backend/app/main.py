@@ -1,10 +1,12 @@
 from collections import defaultdict, deque
 from datetime import datetime
+from pathlib import Path
 import json
 import time
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.limiter import limiter
@@ -22,6 +24,7 @@ from app.api.rider.rider import router as rider_router
 from app.api.user.rides import router as rides_router
 from app.api.user.services import router as services_router
 from app.api.common.system import router as system_router
+from app.api.common.app_releases import router as app_releases_router
 from app.api.user.vehicles import router as vehicles_router
 from app.api.user.radar import router as radar_router
 from app.api.admin.crm import router as crm_router
@@ -451,6 +454,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 _origins = [
     "https://bookmygadi.app",
     "https://www.bookmygadi.app",
+    "https://web.bookmygadi.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
@@ -529,6 +533,7 @@ async def basic_rate_limiter(request: Request, call_next):
     return await call_next(request)
 
 app.include_router(system_router)
+app.include_router(app_releases_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
 app.include_router(admin_enterprise_router, prefix=settings.api_prefix)
@@ -549,6 +554,10 @@ app.include_router(ride_intelligence_router, prefix=f"{settings.api_prefix}/inte
 app.include_router(ride_intelligence_ws_router)
 app.include_router(enterprise_router, prefix=f"{settings.api_prefix}/enterprise")
 app.include_router(distributed_platform_router, prefix=f"{settings.api_prefix}/distributed")
+
+app_release_dir = Path(settings.app_release_storage_dir).resolve()
+app_release_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/downloads/app-releases", StaticFiles(directory=str(app_release_dir)), name="app_releases")
 
 
 def _extract_ws_token(websocket: WebSocket) -> str | None:

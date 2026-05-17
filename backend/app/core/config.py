@@ -14,6 +14,10 @@ def _env_file_path() -> str:
     return (Path(__file__).resolve().parents[2] / ".env").as_posix()
 
 
+def _default_app_release_storage_dir() -> str:
+    return (Path(__file__).resolve().parents[2] / "public" / "app-releases").as_posix()
+
+
 class Settings(BaseSettings):
     app_name: str = "BookMyGadi API"
     app_env: str = "development"
@@ -33,6 +37,8 @@ class Settings(BaseSettings):
     mongo_url: str = "mongodb://127.0.0.1:27017"
     mongo_db_name: str = "bookmygadi_admin"
     admin_access_token_expire_minutes: int = 60 * 12
+    app_release_storage_dir: str = _default_app_release_storage_dir()
+    app_release_public_base_url: str = ""
 
     # ── New: Push Notifications ─────────────────────────────────────
     fcm_server_key: str = ""          # Firebase Legacy Server Key

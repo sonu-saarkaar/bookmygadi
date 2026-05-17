@@ -4,7 +4,7 @@ export const PORTAL_CONFIG = {
   SITE_NAME: 'BookMyGadi',
   SITE_DESCRIPTION: "Bihar ka apna mobility platform - Ride, Earn, Reserve, Grow",
   SITE_URL: 'https://web.bookmygadi.app',
-  API_BASE_URL: process.env.VITE_API_URL || 'http://localhost:8000',
+  API_BASE_URL: (import.meta.env.VITE_API_URL as string) || 'http://localhost:8000',
 
   // SEO
   SEO: {

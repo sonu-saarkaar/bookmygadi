@@ -24,7 +24,8 @@ export const adminTokenStore = {
 
 async function requestV1<T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> {
   const headers = new Headers(init.headers || {});
-  if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (!headers.has("Content-Type") && init.body && !isFormData) headers.set("Content-Type", "application/json");
   if (withAuth) {
     const token = adminTokenStore.get();
     if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -113,6 +114,21 @@ export interface RiderRegistrationItem {
   created_at: string;
   updated_at?: string;
 }
+
+export type AppReleaseItem = {
+  id: string;
+  app_type: "user" | "rider";
+  version_name: string;
+  version_code?: string | null;
+  release_notes?: string | null;
+  file_name: string;
+  file_size: number;
+  sha256: string;
+  download_path: string;
+  download_url: string;
+  uploaded_at: string;
+  uploaded_by?: string | null;
+};
 
 export const adminV2Api = {
   seedAdmins: async () => ({ seeded: true, message: "Using existing admin users" }),
@@ -620,6 +636,26 @@ export const adminV2Api = {
   getReferralSettings: () => requestV1<any>("/crm/referral/settings"),
   updateReferralSettings: (payload: any) => requestV1<any>("/crm/referral/settings", { method: "POST", body: JSON.stringify(payload) }),
   getReferralStats: () => requestV1<any>("/crm/referral/stats"),
+
+  listAppReleases: () => requestV1<AppReleaseItem[]>("/admin/app-releases"),
+  uploadAppRelease: (payload: {
+    app_type: "user" | "rider";
+    version_name: string;
+    version_code?: string;
+    release_notes?: string;
+    file: File;
+  }) => {
+    const form = new FormData();
+    form.append("app_type", payload.app_type);
+    form.append("version_name", payload.version_name);
+    if (payload.version_code) form.append("version_code", payload.version_code);
+    if (payload.release_notes) form.append("release_notes", payload.release_notes);
+    form.append("file", payload.file);
+    return requestV1<AppReleaseItem>("/admin/app-releases/upload", {
+      method: "POST",
+      body: form,
+    });
+  },
 
   requestV1: <T>(path: string, init?: RequestInit) => requestV1<T>(path, init),
 };
