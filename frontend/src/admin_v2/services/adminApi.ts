@@ -420,6 +420,180 @@ export const adminV2Api = {
         revenue: completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0),
         average_fare: completedRides.length > 0 ? completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) / completedRides.length : 0,
         paid: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length,
+      method: "cash",
+      status: (r.payment_status || "unpaid").toLowerCase() === "paid" ? "paid" : "pending",
+    }));
+    return { rows };
+  },
+  payoutDriver: async (payment_id: string) => ({ ok: true, payment_id }),
+
+  listTasks: () => requestV1<any[]>("/admin/tasks"),
+  createTask: (payload: any) => requestV1<any>("/admin/tasks", { method: "POST", body: JSON.stringify(payload) }),
+  assignTask: (id: string, assignee_admin_id: string) => requestV1<any>(`/admin/tasks/${id}/assign`, { method: "PATCH", body: JSON.stringify({ assignee_admin_id }) }),
+  updateTaskStatus: (id: string, status: string) => requestV1<any>(`/admin/tasks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  logs: () => requestV1<any[]>("/admin/logs"),
+  listManagedUsers: () => requestV1<any[]>("/users-mgmt/list"),
+  userDashboard: () => requestV1<any>("/users-mgmt/dashboard"),
+
+  // Support Tickets
+  listTickets: (filters?: { status?: string; category?: string; severity?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append("status", filters.status);
+    if (filters?.category) params.append("category", filters.category);
+    if (filters?.severity) params.append("severity", filters.severity);
+    const qs = params.toString();
+    return requestV1<any[]>(`/admin/support/tickets${qs ? "?" + qs : ""}`);
+  },
+  ticketAction: (id: string, payload: {
+    admin_response?: string;
+    emergency_dispatched?: string;
+    assigned_vehicle_id?: string;
+    assigned_to?: string;
+    status?: string;
+  }) => requestV1<any>(`/admin/support/tickets/${id}/action`, { method: "PATCH", body: JSON.stringify(payload) }),
+  assignTicket: (id: string, assignee_admin_id: string) =>
+    requestV1<any>(`/admin/support/tickets/${id}/assign`, { method: "PATCH", body: JSON.stringify({ assignee_admin_id }) }),
+  updateTicketStatus: (id: string, status: string) =>
+    requestV1<any>(`/admin/support/tickets/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // Service Management
+  listAllServices: () => requestV1<any[]>("/services/all"),
+  addService: (payload: any) => requestV1<any>("/services/", { method: "POST", body: JSON.stringify(payload) }),
+  updateService: (id: string, payload: any) => requestV1<any>(`/services/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteService: (id: string) => requestV1<any>(`/services/${id}`, { method: "DELETE" }),
+
+  // Rider vehicle registration approvals (API v1)
+  listRiderRegistrations: (statusFilter?: string) =>
+    requestV1<RiderRegistrationItem[]>(`/vehicles/rider-registrations${statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : ""}`),
+  updateRiderRegistration: (id: string, payload: Partial<RiderRegistrationItem>) =>
+    requestV1<RiderRegistrationItem>(`/vehicles/rider-registrations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  approveRiderRegistration: (id: string, admin_note = "") =>
+    requestV1<RiderRegistrationItem>(`/vehicles/rider-registrations/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note }),
+    }),
+  requestChangesRiderRegistration: (id: string, admin_note = "") =>
+    requestV1<RiderRegistrationItem>(`/vehicles/rider-registrations/${id}/request-changes`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note }),
+    }),
+  rejectRiderRegistration: (id: string, admin_note = "") =>
+    requestV1<RiderRegistrationItem>(`/vehicles/rider-registrations/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note }),
+    }),
+
+  // Driver CRM
+  crmListDrivers: (status?: string, assignedMemberId?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.append("status", status);
+    if (assignedMemberId) params.append("assigned_member_id", assignedMemberId);
+    const qs = params.toString();
+    return requestV1<any[]>(`/crm/drivers${qs ? "?" + qs : ""}`);
+  },
+  crmListTeamMembers: () => requestV1<any[]>("/crm/team-members"),
+  crmAssignDriver: (id: string, team_member_id: string) => requestV1<any>(`/crm/drivers/${id}/assign`, { method: "POST", body: JSON.stringify({ team_member_id }) }),
+  crmApproveDriver: (id: string, note = "") => requestV1<any>(`/crm/drivers/${id}/approve`, { method: "POST", body: JSON.stringify({ note }) }),
+  crmRejectDriver: (id: string, note = "") => requestV1<any>(`/crm/drivers/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
+  crmRefileDriver: (id: string, note = "") => requestV1<any>(`/crm/drivers/${id}/refile`, { method: "POST", body: JSON.stringify({ note }) }),
+  crmBlockDriver: (id: string, reason: string) => requestV1<any>(`/crm/drivers/${id}/block`, { method: "POST", body: JSON.stringify({ reason }) }),
+  crmDashboard: () => requestV1<any>("/crm/dashboard-analytics"),
+  listEnterpriseTeamMembers: () => requestV1<any[]>("/admin/enterprise/team-members"),
+  createEnterpriseTeamMember: (payload: any) => requestV1<any>("/admin/enterprise/team-members", { method: "POST", body: JSON.stringify(payload) }),
+  updateEnterpriseTeamMember: (memberId: string, payload: any) =>
+    requestV1<any>(`/admin/enterprise/team-members/${memberId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  listFounderProfiles: () => requestV1<any[]>("/admin/enterprise/company/founders"),
+  upsertFounderProfile: (payload: any) => requestV1<any>("/admin/enterprise/company/founders", { method: "POST", body: JSON.stringify(payload) }),
+  getPolicy: (policyType: "terms" | "privacy" | "refund") => requestV1<any>(`/admin/enterprise/policies/${policyType}`),
+  savePolicy: (policyType: "terms" | "privacy" | "refund", payload: any) =>
+    requestV1<any>(`/admin/enterprise/policies/${policyType}`, { method: "PUT", body: JSON.stringify(payload) }),
+  listSearchMonitor: (status?: string) =>
+    requestV1<any[]>(`/admin/enterprise/search-monitor${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  assignSearchDriver: (eventId: string, driver_id: string) =>
+    requestV1<any>(`/admin/enterprise/search-monitor/${eventId}/assign-driver`, { method: "PATCH", body: JSON.stringify({ driver_id }) }),
+  acceptSearch: (eventId: string) =>
+    requestV1<any>(`/admin/enterprise/search-monitor/${eventId}/accept`, { method: "PATCH" }),
+  getDispatchControl: () => requestV1<any>("/admin/enterprise/dispatch-control"),
+  updateDispatchControl: (mode: "auto" | "manual" | "hybrid", notes?: string) =>
+    requestV1<any>("/admin/enterprise/dispatch-control", { method: "PUT", body: JSON.stringify({ mode, notes }) }),
+
+  // Finance & Settlements
+  getFinanceDashboard: async () => {
+    try {
+      return await requestV1<any>("/admin/finance/dashboard");
+    } catch {
+      // Fallback: aggregate from rides if endpoint not available
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayRides = rides.filter(r => new Date(r.created_at) >= today && (r.status || "").toLowerCase() === "completed");
+      const todayRevenue = todayRides.reduce((sum, r) => sum + (Number(r.agreed_fare) || 0), 0);
+      const paidCount = todayRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length;
+      const pendingCount = todayRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").length;
+
+      return {
+        today: { rides: todayRides.length, revenue: todayRevenue, paid: paidCount, pending: pendingCount },
+        week: { rides: rides.length, revenue: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) },
+        month: { rides: rides.length, revenue: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) }
+      };
+    }
+  },
+
+  getDriverWallets: async () => {
+    try {
+      return await requestV1<any[]>("/admin/finance/driver-wallets");
+    } catch {
+      // Fallback: aggregate from drivers
+      const drivers = await requestV1<any[]>("/admin/drivers");
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      return drivers.map(d => {
+        const driverRides = rides.filter(r => r.driver_id === d.id);
+        const totalEarned = driverRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0);
+        const pendingSettlement = driverRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0);
+        return { driver_id: d.id, name: d.name, balance: totalEarned, pending_settlement: pendingSettlement, total_earned: totalEarned, rides_count: driverRides.length };
+      });
+    }
+  },
+
+  getDriverEarnings: (driverId: string) => requestV1<any[]>(`/driver/${driverId}/earnings`),
+
+  getSettlementQueue: async () => {
+    try {
+      return await requestV1<any[]>("/admin/finance/settlement-queue");
+    } catch {
+      // Fallback: get drivers with pending settlements
+      const wallets = await adminV2Api.getDriverWallets();
+      return wallets.filter((w: any) => w.pending_settlement > 0).sort((a: any, b: any) => b.pending_settlement - a.pending_settlement);
+    }
+  },
+
+  processSettlement: (driverId: string, amount: number) =>
+    requestV1<any>("/admin/finance/settlement", {
+      method: "POST",
+      body: JSON.stringify({ driver_id: driverId, amount })
+    }),
+
+  getDailyMetrics: async () => {
+    try {
+      return await requestV1<any>("/admin/metrics/daily");
+    } catch {
+      // Fallback: calculate from rides
+      const rides = await requestV1<any[]>("/admin/rides?limit=500");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayRides = rides.filter(r => new Date(r.created_at) >= today);
+      const completedRides = todayRides.filter(r => (r.status || "").toLowerCase() === "completed");
+      return {
+        date: today.toISOString().split('T')[0],
+        total_rides: todayRides.length,
+        completed_rides: completedRides.length,
+        revenue: completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0),
+        average_fare: completedRides.length > 0 ? completedRides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0) / completedRides.length : 0,
+        paid: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "paid").length,
         pending: completedRides.filter(r => (r.payment_status || "").toLowerCase() === "unpaid").length
       };
     }
@@ -439,6 +613,14 @@ export const adminV2Api = {
       return { rides_total: rides.length, revenue_total: rides.reduce((s, r) => s + (Number(r.agreed_fare) || 0), 0), data: [] };
     }
   },
+
+  // Marketing & Broadcast
+  sendBroadcast: (payload: { title: string; message: string; target_audience: string; image_url?: string }) =>
+    requestV1<any>("/crm/broadcast", { method: "POST", body: JSON.stringify(payload) }),
+  listBroadcasts: () => requestV1<any[]>("/crm/broadcasts"),
+  getReferralSettings: () => requestV1<any>("/crm/referral/settings"),
+  updateReferralSettings: (payload: any) => requestV1<any>("/crm/referral/settings", { method: "POST", body: JSON.stringify(payload) }),
+  getReferralStats: () => requestV1<any>("/crm/referral/stats"),
 
   requestV1: <T>(path: string, init?: RequestInit) => requestV1<T>(path, init),
 };

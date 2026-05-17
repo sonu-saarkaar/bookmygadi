@@ -14,7 +14,6 @@ from app.models import (
     PolicyDocument,
     Ride,
     RideSearchEvent,
-    RiderVehicleRegistration,
     User,
 )
 
@@ -70,25 +69,6 @@ class SearchAssignPayload(BaseModel):
 class DispatchPayload(BaseModel):
     mode: str = Field(pattern="^(auto|manual|hybrid)$")
     notes: str | None = None
-
-
-def _resolve_driver_identifier(db: Session, identifier: str) -> User | None:
-    value = (identifier or "").strip()
-    if not value:
-        return None
-    driver = db.get(User, value)
-    if not driver:
-        driver = db.query(User).filter(User.public_id == value).first()
-    if not driver:
-        registration = (
-            db.query(RiderVehicleRegistration)
-            .filter(RiderVehicleRegistration.rider_id_format == value)
-            .order_by(RiderVehicleRegistration.created_at.desc())
-            .first()
-        )
-        if registration:
-            driver = db.get(User, registration.driver_id)
-    return driver if driver and driver.role == "driver" else None
 
 
 @router.get("/team-members")
@@ -273,33 +253,17 @@ def list_search_monitor(
     out: list[dict] = []
     for row in rows:
         elapsed = max(0, int((datetime.utcnow() - (row.search_started_at or row.created_at)).total_seconds()))
-        user = db.get(User, row.user_id) if row.user_id else None
-        driver = db.get(User, row.assigned_driver_id) if row.assigned_driver_id else None
-        ride = db.get(Ride, row.ride_id) if row.ride_id else None
-        driver_registration = (
-            db.query(RiderVehicleRegistration)
-            .filter(RiderVehicleRegistration.driver_id == driver.id, RiderVehicleRegistration.rider_id_format.isnot(None))
-            .order_by(RiderVehicleRegistration.updated_at.desc())
-            .first()
-            if driver
-            else None
-        )
         out.append(
             {
                 "id": row.id,
-                "public_id": row.public_id,
                 "user_id": row.user_id,
-                "user_public_id": user.public_id if user else None,
                 "pickup_location": row.pickup_location,
                 "drop_location": row.drop_location,
                 "search_mode": row.search_mode,
                 "vehicle_type": row.vehicle_type,
                 "status": row.status,
                 "assigned_driver_id": row.assigned_driver_id,
-                "assigned_driver_public_id": driver.public_id if driver else None,
-                "assigned_driver_rider_id": driver_registration.rider_id_format if driver_registration else None,
                 "ride_id": row.ride_id,
-                "ride_public_id": ride.public_id if ride else None,
                 "search_started_at": row.search_started_at,
                 "searched_seconds": row.searched_seconds or elapsed,
             }
@@ -317,20 +281,20 @@ def assign_driver_to_search(
     row = db.get(RideSearchEvent, event_id)
     if not row:
         raise HTTPException(status_code=404, detail="Search event not found")
-    driver = _resolve_driver_identifier(db, payload.driver_id)
-    if not driver:
+    driver = db.get(User, payload.driver_id)
+    if not driver or driver.role != "driver":
         raise HTTPException(status_code=404, detail="Driver not found")
-    row.assigned_driver_id = driver.id
+    row.assigned_driver_id = payload.driver_id
     row.status = "assigned"
     row.searched_seconds = max(0, int((datetime.utcnow() - (row.search_started_at or row.created_at)).total_seconds()))
     if row.ride_id:
         ride = db.get(Ride, row.ride_id)
         if ride and (ride.status or "").lower() in {"pending", "searching", "assigned"}:
-            ride.driver_id = driver.id
+            ride.driver_id = payload.driver_id
             ride.status = "accepted"
             if ride.accepted_at is None:
                 ride.accepted_at = datetime.utcnow()
-    _audit(db, admin, "dispatch", f"manually assigned driver {driver.public_id or driver.id} for search {row.public_id or event_id}")
+    _audit(db, admin, "dispatch", f"manually assigned driver {payload.driver_id} for search {event_id}")
     db.commit()
     return {"ok": True}
 

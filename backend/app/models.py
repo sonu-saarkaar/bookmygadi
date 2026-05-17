@@ -74,6 +74,7 @@ class User(Base, TimestampMixin):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     blocked_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     driver_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pin_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     fcm_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
     total_rides: Mapped[int] = mapped_column(Integer, default=0)
@@ -124,8 +125,6 @@ class Ride(Base, TimestampMixin):
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
-    payment_public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
 
     messages: Mapped[list["RideMessage"]] = relationship(
         back_populates="ride",
@@ -166,8 +165,6 @@ class Ride(Base, TimestampMixin):
 
     @property
     def booking_display_id(self) -> str:
-        if self.public_id:
-            return self.public_id
         try:
             urgency = ((self.preference.urgency_type if getattr(self, "preference", None) else None) or "").lower()
             vehicle_model = (self.preference.vehicle_model if getattr(self, "preference", None) else None) or ""
@@ -187,10 +184,6 @@ class Ride(Base, TimestampMixin):
             return f"BMG{middle}{district_code}{random_part}"
         except (AttributeError, TypeError):
             return generate_booking_display_id(str(self.id))
-
-    @property
-    def payment_display_id(self) -> str | None:
-        return self.payment_public_id
 
 
 class RidePreference(Base, TimestampMixin):
@@ -363,7 +356,6 @@ class RiderVehicleRegistration(Base, TimestampMixin):
     driver_calling_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     driver_dl_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     rider_id_format: Mapped[str | None] = mapped_column(String(20), nullable=True, unique=True)
-    request_public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
 
 
 class ReserveRoutePrice(Base, TimestampMixin):
@@ -638,7 +630,6 @@ class RideSearchEvent(Base, TimestampMixin):
     assigned_driver_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     ride_id: Mapped[str | None] = mapped_column(ForeignKey("rides.id"), nullable=True)
     searched_seconds: Mapped[int] = mapped_column(Integer, default=0)
-    public_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True, nullable=True)
 
 
 class DispatchControl(Base, TimestampMixin):

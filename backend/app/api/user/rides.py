@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.common.deps import get_current_user, require_role
 from app.api.common.realtime import realtime_manager
 from app.core.config import settings
-from app.core.ids import next_ride_public_id, next_search_public_id, public_payment_id
 from app.core.notifications import notify_new_ride_request_batch, notify_ride_cancelled
 from app.db import engine, get_db
 from app.models import (
@@ -63,16 +62,27 @@ def _vehicle_type_matches(reg_vt: str, ride_vt: str) -> bool:
     return False
 
 
+def _approved_driver_ids(db: Session) -> set[str]:
+    rows = db.query(RiderVehicleRegistration.driver_id).filter(
+        RiderVehicleRegistration.status == "approved"
+    ).all()
+    return {row[0] for row in rows if row[0]}
+
+
 def _driver_tokens_prioritized(db: Session, ride: Ride) -> list[str]:
     """FCM tokens: preferred vehicle match, nearby idle drivers, lower active ride load."""
     ride_vt = (ride.vehicle_type or "car").lower()
     approved_regs = db.query(RiderVehicleRegistration).filter(RiderVehicleRegistration.status == "approved").all()
+    approved_ids = {r.driver_id for r in approved_regs if r.driver_id}
     preferred_ids = {r.driver_id for r in approved_regs if _vehicle_type_matches(r.vehicle_type, ride_vt)}
+    if not approved_ids:
+        return []
 
     drivers = (
         db.query(User)
         .filter(
             User.role == "driver",
+            User.id.in_(approved_ids),
             User.fcm_token.isnot(None),
             or_(User.driver_status.is_(None), User.driver_status != "rejected"),
         )
@@ -199,7 +209,6 @@ def _validate_location_payload(
 def _tracking_payload(ride: Ride) -> RideTrackingRead:
     return RideTrackingRead(
         ride_id=ride.id,
-        booking_display_id=ride.booking_display_id,
         status=ride.status,
         pickup_location=ride.pickup_location,
         destination=ride.destination,
@@ -265,11 +274,8 @@ async def create_ride(
     )
     db.add(ride)
     db.flush()
-    ride.public_id = next_ride_public_id(db, Ride)
-    ride.payment_public_id = public_payment_id(ride.public_id)
     db.add(
         RideSearchEvent(
-            public_id=next_search_public_id(db, RideSearchEvent),
             user_id=current_user.id,
             pickup_location=payload.pickup_location,
             drop_location=payload.destination,
@@ -341,8 +347,10 @@ async def create_ride(
 
     # Broadcast to generic ride channel
     await realtime_manager.broadcast(ride.id, {"event": "ride_created", "ride": RideRead.model_validate(ride).model_dump(mode="json")})
-    # Also broadcast live to all connected riders so they see incoming requests instantly
-    await realtime_manager.broadcast_to_all_riders({"event": "new_ride_request", "ride": RideRead.model_validate(ride).model_dump(mode="json")})
+    # Also broadcast live only to approved riders so unapproved gadi accounts never receive requests.
+    ride_payload = {"event": "new_ride_request", "ride": RideRead.model_validate(ride).model_dump(mode="json")}
+    for driver_id in _approved_driver_ids(db):
+        await realtime_manager.broadcast_to_rider(driver_id, ride_payload)
     
     return ride
 
@@ -351,7 +359,10 @@ async def create_ride(
 def list_rides(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[RideRead]:
     query = db.query(Ride).options(joinedload(Ride.preference), joinedload(Ride.driver)).order_by(Ride.created_at.desc())
     if current_user.role == "driver":
-        rides = query.filter((Ride.driver_id == current_user.id) | (Ride.status == "pending")).all()
+        if current_user.id in _approved_driver_ids(db):
+            rides = query.filter((Ride.driver_id == current_user.id) | (Ride.status == "pending")).all()
+        else:
+            rides = query.filter(Ride.driver_id == current_user.id).all()
     elif current_user.role == "admin":
         rides = query.all()
     else:
@@ -367,6 +378,10 @@ def get_ride(ride_id: str, current_user: User = Depends(get_current_user), db: S
 
     if current_user.role != "admin" and current_user.id not in {ride.customer_id, ride.driver_id}:
         raise HTTPException(status_code=403, detail="Access denied")
+    if ride.estimated_fare_min is not None and payload.amount < ride.estimated_fare_min:
+        raise HTTPException(status_code=400, detail=f"Offer must be at least ₹{ride.estimated_fare_min}")
+    if ride.estimated_fare_max is not None and payload.amount > ride.estimated_fare_max:
+        raise HTTPException(status_code=400, detail=f"Offer cannot be more than ₹{ride.estimated_fare_max}")
 
     return ride
 
@@ -581,16 +596,41 @@ async def create_negotiation(
         status="pending",
     )
     db.add(row)
+    if offered_by == "customer":
+        ride.requested_fare = payload.amount
+    ride.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    db.refresh(ride)
 
+    ride_payload = RideRead.model_validate(ride).model_dump(mode="json")
     await realtime_manager.broadcast(
         ride_id,
         {
             "event": "ride_negotiation_created",
             "negotiation": RideNegotiationRead.model_validate(row).model_dump(mode="json"),
+            "ride": ride_payload,
         },
     )
+    if offered_by == "customer":
+        await realtime_manager.broadcast_to_all_riders(
+            {
+                "event": "new_ride_request",
+                "reason": "customer_offer",
+                "ride_id": ride.id,
+                "id": ride.id,
+                "booking_display_id": ride.booking_display_id,
+                "pickup_location": ride.pickup_location,
+                "destination": ride.destination,
+                "vehicle_type": ride.vehicle_type,
+                "status": ride.status,
+                "fare": payload.amount,
+                "requested_fare": payload.amount,
+                "estimated_fare_min": ride.estimated_fare_min,
+                "estimated_fare_max": ride.estimated_fare_max,
+                "ride": ride_payload,
+            }
+        )
     return row
 
 
@@ -626,19 +666,46 @@ async def act_negotiation(
             ride.driver_id = negotiation.driver_id
     else:
         negotiation.status = "rejected"
+    ride.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(negotiation)
     db.refresh(ride)
 
+    negotiation_payload = RideNegotiationRead.model_validate(negotiation).model_dump(mode="json")
+    ride_payload = RideRead.model_validate(ride).model_dump(mode="json")
     await realtime_manager.broadcast(
         ride_id,
         {
             "event": "ride_negotiation_updated",
-            "negotiation": RideNegotiationRead.model_validate(negotiation).model_dump(mode="json"),
-            "ride": RideRead.model_validate(ride).model_dump(mode="json"),
+            "negotiation": negotiation_payload,
+            "ride": ride_payload,
         },
     )
+    if negotiation.driver_id:
+        await realtime_manager.broadcast_to_rider(
+            negotiation.driver_id,
+            {
+                "event": "ride_negotiation_updated",
+                "reason": f"offer_{negotiation.status}",
+                "ride_id": ride.id,
+                "id": ride.id,
+                "booking_display_id": ride.booking_display_id,
+                "pickup_location": ride.pickup_location,
+                "destination": ride.destination,
+                "vehicle_type": ride.vehicle_type,
+                "status": ride.status,
+                "fare": negotiation.amount,
+                "requested_fare": ride.requested_fare,
+                "estimated_fare_min": ride.estimated_fare_min,
+                "estimated_fare_max": ride.estimated_fare_max,
+                "latest_offer_amount": negotiation.amount,
+                "latest_offer_by": negotiation.offered_by,
+                "latest_offer_status": negotiation.status,
+                "ride": ride_payload,
+                "negotiation": negotiation_payload,
+            },
+        )
     return negotiation
 
 
@@ -758,11 +825,7 @@ async def mark_ride_payment(
                 },
             },
         )
-    if not ride.payment_public_id:
-        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
-        db.commit()
-        db.refresh(ride)
-    return PaymentReceiveRead(ride_id=ride.id, payment_public_id=ride.payment_public_id, payment_status=ride.payment_status, status=ride.status)
+    return PaymentReceiveRead(ride_id=ride.id, payment_status=ride.payment_status, status=ride.status)
 
 
 @router.get("/{ride_id}/tracking", response_model=RideTrackingRead)

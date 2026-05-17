@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from app.api.common.deps import get_current_user
 from app.core.config import settings
-from app.core.ids import public_payment_id
 from app.db import get_db
 from app.models import Ride, User
 
@@ -40,7 +39,6 @@ class CreateOrderResponse(BaseModel):
     amount: int          # paise (1 INR = 100 paise)
     currency: str
     ride_id: str
-    payment_public_id: str | None = None
     razorpay_key: str    # public key sent to client
 
 
@@ -55,7 +53,6 @@ class VerifyPaymentResponse(BaseModel):
     success: bool
     message: str
     ride_id: str
-    payment_public_id: str | None = None
     payment_status: str
 
 
@@ -119,17 +116,13 @@ def create_payment_order(
 
     fare = ride.agreed_fare or ride.estimated_fare_max or 0
     amount_paise = int(fare * 100)  # Razorpay works in the smallest currency unit
-    if not ride.payment_public_id:
-        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
-        db.commit()
-        db.refresh(ride)
 
     client = _get_razorpay_client()
 
     order_data = client.order.create({
         "amount": amount_paise,
         "currency": "INR",
-        "receipt": ride.payment_public_id or f"bmg_{ride.id[:8]}",
+        "receipt": f"bmg_{ride.id[:8]}",
         "notes": {
             "ride_id": ride.id,
             "customer_id": current_user.id,
@@ -141,7 +134,6 @@ def create_payment_order(
         amount=amount_paise,
         currency="INR",
         ride_id=ride.id,
-        payment_public_id=ride.payment_public_id,
         razorpay_key=settings.razorpay_key_id,
     )
 
@@ -177,15 +169,12 @@ def verify_payment(
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
     ride.payment_status = "paid"
-    if not ride.payment_public_id:
-        ride.payment_public_id = public_payment_id(ride.public_id or ride.booking_display_id)
     db.commit()
 
     return VerifyPaymentResponse(
         success=True,
         message="Payment verified successfully",
         ride_id=ride.id,
-        payment_public_id=ride.payment_public_id,
         payment_status="paid",
     )
 
@@ -208,8 +197,6 @@ def get_payment_status(
 
     return {
         "ride_id": ride.id,
-        "booking_display_id": ride.booking_display_id,
-        "payment_public_id": ride.payment_public_id,
         "payment_status": ride.payment_status,
         "agreed_fare": ride.agreed_fare,
         "ride_status": ride.status,

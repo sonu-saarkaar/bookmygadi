@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.common.deps import get_admin_user, get_current_user
-from app.core.ids import next_request_public_id, next_rider_public_id
+from app.api.common.realtime import realtime_manager
+from app.core.notifications import notify_vehicle_registration_status
 from app.db import get_db
 from app.models import RiderVehicleRegistration, User, VehicleInventory
 from app.schemas import (
@@ -17,6 +18,44 @@ from app.schemas import (
 
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
+
+
+async def _notify_vehicle_registration_decision(
+    *,
+    rider_id: str,
+    fcm_token: str | None,
+    registration_id: str,
+    status_value: str,
+    vehicle_name: str | None,
+    admin_note: str | None,
+) -> None:
+    title = "Gadi Approved" if status_value == "approved" else "Gadi Registration Update"
+    body = (
+        f"{vehicle_name or 'Your gadi'} approved. You can now go on duty."
+        if status_value == "approved"
+        else f"{vehicle_name or 'Your gadi'} status: {status_value.replace('_', ' ').title()}."
+    )
+    await realtime_manager.broadcast_to_rider(
+        rider_id,
+        {
+            "event": "vehicle_registration_status",
+            "type": "vehicle_registration_status",
+            "ride_id": registration_id,
+            "id": registration_id,
+            "registration_id": registration_id,
+            "status": status_value,
+            "title": title,
+            "body": body,
+            "admin_note": admin_note or "",
+        },
+    )
+    await notify_vehicle_registration_status(
+        fcm_token,
+        registration_id=registration_id,
+        status=status_value,
+        vehicle_name=vehicle_name,
+        admin_note=admin_note,
+    )
 
 
 @router.get("", response_model=list[VehicleRead])
@@ -92,6 +131,9 @@ def delete_vehicle(
     db.commit()
 
 
+import uuid
+import random
+
 @router.post("/rider-registrations", response_model=RiderVehicleRegistrationRead, status_code=status.HTTP_201_CREATED)
 def create_rider_vehicle_registration(
     payload: RiderVehicleRegistrationCreate,
@@ -101,8 +143,8 @@ def create_rider_vehicle_registration(
     if current_user.role not in {"driver", "admin"}:
         raise HTTPException(status_code=403, detail="Driver access required")
 
-    request_id = next_request_public_id(db, RiderVehicleRegistration)
-    rider_id = next_rider_public_id(db, RiderVehicleRegistration, payload.area)
+    bmg_id = f"BMG{random.randint(100000, 999999)}"
+    # ensure uniqueness simple loop (if needed), very low collision chance for now
     
     row = RiderVehicleRegistration(
         driver_id=current_user.id,
@@ -117,7 +159,6 @@ def create_rider_vehicle_registration(
         insurance_number=payload.insurance_number,
         notes=payload.notes,
         status="pending",
-        request_public_id=request_id,
         vehicle_category=payload.vehicle_category,
         service_type=payload.service_type,
         model_year=payload.model_year,
@@ -132,7 +173,7 @@ def create_rider_vehicle_registration(
         driver_number=payload.driver_number,
         driver_calling_number=payload.driver_calling_number,
         driver_dl_number=payload.driver_dl_number,
-        rider_id_format=rider_id,
+        rider_id_format=bmg_id,
     )
     db.add(row)
     db.commit()
@@ -203,6 +244,7 @@ def list_rider_vehicle_registrations(
 def approve_rider_vehicle_registration(
     registration_id: str,
     payload: RiderVehicleApprovalAction,
+    background_tasks: BackgroundTasks,
     admin: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> RiderVehicleRegistrationRead:
@@ -213,12 +255,19 @@ def approve_rider_vehicle_registration(
     row.status = "approved"
     row.admin_note = payload.admin_note
     row.approved_by = admin.id
-    if not row.rider_id_format:
-        row.rider_id_format = next_rider_public_id(db, RiderVehicleRegistration, row.area)
-    if not row.request_public_id:
-        row.request_public_id = next_request_public_id(db, RiderVehicleRegistration)
     db.commit()
     db.refresh(row)
+    driver = db.get(User, row.driver_id)
+    if driver:
+        background_tasks.add_task(
+            _notify_vehicle_registration_decision,
+            rider_id=driver.id,
+            fcm_token=driver.fcm_token,
+            registration_id=row.id,
+            status_value=row.status,
+            vehicle_name=row.brand_model,
+            admin_note=row.admin_note,
+        )
     return row
 
 
@@ -226,6 +275,7 @@ def approve_rider_vehicle_registration(
 def reject_rider_vehicle_registration(
     registration_id: str,
     payload: RiderVehicleApprovalAction,
+    background_tasks: BackgroundTasks,
     admin: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> RiderVehicleRegistrationRead:
@@ -238,6 +288,17 @@ def reject_rider_vehicle_registration(
     row.approved_by = admin.id
     db.commit()
     db.refresh(row)
+    driver = db.get(User, row.driver_id)
+    if driver:
+        background_tasks.add_task(
+            _notify_vehicle_registration_decision,
+            rider_id=driver.id,
+            fcm_token=driver.fcm_token,
+            registration_id=row.id,
+            status_value=row.status,
+            vehicle_name=row.brand_model,
+            admin_note=row.admin_note,
+        )
     return row
 
 
@@ -245,6 +306,7 @@ def reject_rider_vehicle_registration(
 def request_changes_rider_vehicle_registration(
     registration_id: str,
     payload: RiderVehicleApprovalAction,
+    background_tasks: BackgroundTasks,
     admin: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ) -> RiderVehicleRegistrationRead:
@@ -257,4 +319,15 @@ def request_changes_rider_vehicle_registration(
     row.approved_by = admin.id
     db.commit()
     db.refresh(row)
+    driver = db.get(User, row.driver_id)
+    if driver:
+        background_tasks.add_task(
+            _notify_vehicle_registration_decision,
+            rider_id=driver.id,
+            fcm_token=driver.fcm_token,
+            registration_id=row.id,
+            status_value=row.status,
+            vehicle_name=row.brand_model,
+            admin_note=row.admin_note,
+        )
     return row

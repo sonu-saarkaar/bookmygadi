@@ -18,7 +18,6 @@ router = APIRouter(prefix="/users-mgmt", tags=["user_management"])
 class UserMgmtRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    public_id: Optional[str] = None
     name: str
     email: str
     phone: Optional[str] = None

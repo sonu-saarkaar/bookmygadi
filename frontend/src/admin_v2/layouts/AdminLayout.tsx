@@ -46,6 +46,12 @@ const menuGroups = [
     ],
   },
   {
+    title: "Marketing & Growth",
+    items: [
+      { key: "broadcast", label: "Broadcast System", icon: Lucide.Megaphone },
+    ],
+  },
+  {
     title: "System Control",
     items: [
       { key: "policies", label: "Policy Management", icon: Lucide.FileText },
